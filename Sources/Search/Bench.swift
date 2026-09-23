@@ -42,6 +42,7 @@ final class Bench {
             "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
             "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "o": 31, "u": 32,
             "i": 34, "p": 35, "l": 37, "j": 38, "k": 40, "n": 45, "m": 46,
+            "1": 18, "2": 19, "3": 20, "4": 21, "5": 23, "6": 22, "7": 26, "8": 28, "9": 25, "0": 29,
         ]
         return codes[Character(character.lowercased())] ?? 49
     }
@@ -407,6 +408,99 @@ final class Bench {
                 answer(["typed": text, "sentBackUnused": resent, "quieted": PageView.quieted - before])
             }
 
+        case "press":
+            // A key, with modifiers, through the app's own event queue — so
+            // the key monitor and the menus see it as they see a hand's, not
+            // only the page. Only on a SEARCH_PROBE run.
+            guard Store.testing else { answer(["error": "press only works on a --test run"]); return }
+            guard let key = request["key"] as? String, let first = key.first, let window = Links.window else {
+                answer(["error": "press needs a key"])
+                return
+            }
+            var flags: NSEvent.ModifierFlags = []
+            for name in (request["mods"] as? String ?? "").split(separator: ",") {
+                switch name {
+                case "cmd": flags.insert(.command)
+                case "shift": flags.insert(.shift)
+                case "ctrl": flags.insert(.control)
+                case "opt": flags.insert(.option)
+                default: break
+                }
+            }
+            let special: [String: (UInt16, String)] = ["tab": (48, "\t"), "esc": (53, "\u{1B}"), "return": (36, "\r")]
+            let (code, chars) = special[key] ?? (Bench.keyCode(for: first), key)
+            window.makeKeyAndOrderFront(nil)
+            for type in [NSEvent.EventType.keyDown, .keyUp] {
+                guard let event = NSEvent.keyEvent(
+                    with: type, location: .zero, modifierFlags: flags,
+                    timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil,
+                    characters: chars, charactersIgnoringModifiers: chars,
+                    isARepeat: false, keyCode: code
+                ) else { continue }
+                NSApp.postEvent(event, atStart: false)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                answer([
+                    "active": browser.active.map(Bench.short) ?? "",
+                    "index": browser.tabs.firstIndex { $0.id == browser.activeID } ?? -1,
+                    "field": browser.editing,
+                    "bare": browser.prefs.bare,
+                ])
+            }
+
+        case "mouse":
+            // A press, a drag along a path and a release, at points measured
+            // from the window's top-left corner, through the event queue —
+            // for the strip, the tabs and what a double-click does. Only on
+            // a SEARCH_PROBE run.
+            guard Store.testing else { answer(["error": "mouse only works on a --test run"]); return }
+            guard let window = Links.window, let path = request["path"] as? [[Double]],
+                  let first = path.first, first.count == 2
+            else { answer(["error": "mouse needs a path of [x, y] points"]); return }
+            let clicks = max(1, request["clicks"] as? Int ?? 1)
+            func post(_ type: NSEvent.EventType, _ p: [Double], count: Int) {
+                guard let event = NSEvent.mouseEvent(
+                    with: type, location: NSPoint(x: p[0], y: window.frame.height - p[1]), modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: count, pressure: 1
+                ) else { return }
+                NSApp.postEvent(event, atStart: false)
+            }
+            window.makeKeyAndOrderFront(nil)
+            var delay = 0.05
+            func later(_ work: @escaping () -> Void) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+                delay += 0.03
+            }
+            for n in 1...clicks {
+                later { post(.leftMouseDown, first, count: n) }
+                for p in path.dropFirst() where p.count == 2 { later { post(.leftMouseDragged, p, count: n) } }
+                later { post(.leftMouseUp, path.last ?? first, count: n) }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.6) {
+                answer([
+                    "frame": [Int(window.frame.minX), Int(window.frame.minY), Int(window.frame.width), Int(window.frame.height)],
+                    "tabs": browser.tabs.map { Bench.short($0) },
+                    "active": browser.active.map(Bench.short) ?? "",
+                ])
+            }
+
+        case "hit":
+            // Which view a click at a point, from the window's top-left,
+            // would land on — the chain of views from it up to the window —
+            // for the strip, the tabs and whatever AppKit puts over them.
+            guard let window = Links.window, let path = request["path"] as? [[Double]],
+                  let first = path.first, first.count == 2, let frame = window.contentView?.superview
+            else { answer(["error": "hit needs a point"]); return }
+            var chain: [String] = []
+            var view = frame.hitTest(NSPoint(x: first[0], y: window.frame.height - first[1]))
+            while let here = view {
+                chain.append("\(type(of: here))")
+                view = here.superview
+            }
+            answer(["hit": chain])
+
         case "resize":
             // The window taken to another size in steps, a frame apart, the
             // way a hand drags its corner — for what that does to the title
@@ -463,6 +557,8 @@ final class Bench {
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
                 "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "ui",
+                "key", "press", "mouse", "resize", "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload",
+                "ext-page", "ext-popup", "ext-menu", "ext-pin", "ext-shot", "ext-answer", "ext-enable",
             ]])
         }
     }
