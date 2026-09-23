@@ -12,8 +12,12 @@ struct SideBar: View {
 
     @Namespace private var pill
 
+    /// A row under the hand: where it started, where it would land, how far
+    /// it has come. As in the strip, the list is left alone until the hand
+    /// lets go — the others step aside, and the move is made once.
     @State private var dragging: Tab.ID?
     @State private var from = 0
+    @State private var target = 0
     @State private var travel: CGFloat = 0
     @State private var landing = false
     /// The width the column had when the edge was picked up.
@@ -25,6 +29,7 @@ struct SideBar: View {
     /// two different axes.
     @State private var pinDragging: Tab.ID?
     @State private var pinFrom = 0
+    @State private var pinTarget = 0
     @State private var pinTravel: CGSize = .zero
 
     private static let row: CGFloat = 28
@@ -204,20 +209,26 @@ struct SideBar: View {
         .coordinateSpace(name: "pins")
     }
 
-    /// The one square actually held stays glued to the fingers; every other
-    /// square is already exactly where it belongs, because `browser.move`
-    /// put it there — this only cancels out the bit of that same movement
-    /// the held square already got for free by changing index underneath
-    /// its own drag.
+    /// The held square stays glued to the fingers. A square it has passed
+    /// takes the place of its neighbour on the near side — the cell before
+    /// or after it in the grid's own row-major order, which may be the far
+    /// end of the row above or below.
     private func pinOffset(held: Bool, index: Int, columns: Int) -> CGSize {
-        guard held else { return .zero }
+        if held { return pinTravel }
+        guard pinDragging != nil else { return .zero }
+        let place: Int
+        if pinFrom < index, index <= pinTarget {
+            place = index - 1
+        } else if pinTarget <= index, index < pinFrom {
+            place = index + 1
+        } else {
+            return .zero
+        }
         let stepX = pinWidth + SideBar.pinGap
         let stepY = pinHeight + SideBar.pinGap
-        let from = (row: pinFrom / columns, col: pinFrom % columns)
-        let now = (row: index / columns, col: index % columns)
         return CGSize(
-            width: pinTravel.width - CGFloat(now.col - from.col) * stepX,
-            height: pinTravel.height - CGFloat(now.row - from.row) * stepY
+            width: CGFloat(place % columns - index % columns) * stepX,
+            height: CGFloat(place / columns - index / columns) * stepY
         )
     }
 
@@ -232,7 +243,7 @@ struct SideBar: View {
         return row * columns + col
     }
 
-    private func pinTarget(from: Int, moved: Int) -> Int {
+    private func pinLanding(from: Int, moved: Int) -> Int {
         min(max(0, from + moved), max(0, pinnedTabs.count - 1))
     }
 
@@ -244,19 +255,19 @@ struct SideBar: View {
                 if pinDragging != tab.id {
                     pinDragging = tab.id
                     pinFrom = index
+                    pinTarget = index
                 }
                 pinTravel = value.translation
                 let stepX = width + SideBar.pinGap
                 let stepY = height + SideBar.pinGap
-                let target = pinTarget(from: pinFrom, moved: pinDelta(columns: columns, stepX: stepX, stepY: stepY))
-                if target != index {
-                    withAnimation(Motion.settle) {
-                        browser.move(tab, to: target)
-                    }
+                let wanted = pinLanding(from: pinFrom, moved: pinDelta(columns: columns, stepX: stepX, stepY: stepY))
+                if wanted != pinTarget {
+                    withAnimation(Motion.settle) { pinTarget = wanted }
                 }
             }
             .onEnded { _ in
                 withAnimation(Motion.settle) {
+                    browser.move(tab, to: pinTarget)
                     pinDragging = nil
                     pinTravel = .zero
                 }
@@ -280,13 +291,21 @@ struct SideBar: View {
                     pill: pill,
                     close: { browser.close(tab) }
                 )
-                .offset(y: held ? travel - CGFloat(index - from) * step : 0)
+                .offset(y: held ? travel : aside(index, step: step))
                 .zIndex(held ? 1 : 0)
                 .shadow(color: .black.opacity(held ? 0.14 : 0), radius: 12, y: 4)
                 .gesture(reorder(tab: tab, index: index, step: step))
             }
         }
         .coordinateSpace(name: "rows")
+    }
+
+    /// How far a row that isn't held has stepped aside for the one that is.
+    private func aside(_ index: Int, step: CGFloat) -> CGFloat {
+        guard dragging != nil else { return 0 }
+        if from < index, index <= target { return -step }
+        if target <= index, index < from { return step }
+        return 0
     }
 
     /// Pick a row up and the others make way as it passes them.
@@ -296,20 +315,19 @@ struct SideBar: View {
                 if dragging != tab.id {
                     dragging = tab.id
                     from = index
+                    target = index
                 }
                 travel = value.translation.height
-                let moved = Int((travel / step).rounded())
-                let target = min(max(0, from + moved), looseTabs.count - 1)
-                if target != index {
-                    // Positions here are among the loose rows; the pinned
-                    // block sits in front of them in the real list.
-                    withAnimation(Motion.settle) {
-                        browser.move(tab, to: target + browser.pinnedCount)
-                    }
+                let wanted = min(max(0, from + Int((travel / step).rounded())), looseTabs.count - 1)
+                if wanted != target {
+                    withAnimation(Motion.settle) { target = wanted }
                 }
             }
             .onEnded { _ in
+                // Positions here are among the loose rows; the pinned block
+                // sits in front of them in the real list.
                 withAnimation(Motion.settle) {
+                    browser.move(tab, to: target + browser.pinnedCount)
                     dragging = nil
                     travel = 0
                 }

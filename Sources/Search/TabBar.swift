@@ -186,10 +186,19 @@ private struct TabRun: View {
     let run: CGFloat
     let overflowing: Bool
 
-    /// Which tab is under the hand, where it started, and how far it has come.
+    /// Which tab is under the hand, where it started, where it would land,
+    /// how far it has come, and how wide a stride it takes. The order itself
+    /// is left alone until the hand lets go: the held tab follows the pointer
+    /// exactly, the others step aside as it passes, and the move is made
+    /// once, at the end. Moving the tab in the list on every crossing
+    /// animated its own jump and the offset undoing it as two springs, and
+    /// caught the pointer's movement in the same spring — a wobble at every
+    /// swap.
     @State private var dragging: Tab.ID?
     @State private var from = 0
+    @State private var target = 0
     @State private var travel: CGFloat = 0
+    @State private var stride: CGFloat = 0
 
     var body: some View {
         ScrollViewReader { reader in
@@ -210,10 +219,9 @@ private struct TabRun: View {
                             pill: pill,
                             close: { browser.close(tab) }
                         )
-                        // The row reflows around it while the pill itself keeps
-                        // up with the hand: what it has travelled, less the
-                        // ground its new place has already given it.
-                        .offset(x: held ? travel - CGFloat(index - from) * step : 0)
+                        // The held pill keeps up with the hand; the others make
+                        // way for it.
+                        .offset(x: held ? travel : aside(index))
                         .zIndex(held ? 1 : 0)
                         .shadow(color: .black.opacity(held ? 0.14 : 0), radius: 12, y: 4)
                         // Ahead of the run's own scrolling. A click without
@@ -239,6 +247,15 @@ private struct TabRun: View {
         .animation(Motion.settle, value: browser.tabs.map(\.id))
     }
 
+    /// How far a tab that isn't held has stepped aside: the held tab's own
+    /// stride, in the direction that makes room for it.
+    private func aside(_ index: Int) -> CGFloat {
+        guard dragging != nil else { return 0 }
+        if from < index, index <= target { return -stride }
+        if target <= index, index < from { return stride }
+        return 0
+    }
+
     /// Pick a tab up and the others get out of its way as it passes them.
     private func reorder(tab: Tab, index: Int, step: CGFloat) -> some Gesture {
         // In the row's space, not the pill's — see the sidebar's grid for why.
@@ -247,16 +264,25 @@ private struct TabRun: View {
                 if dragging != tab.id {
                     dragging = tab.id
                     from = index
+                    target = index
+                    stride = step
                 }
                 travel = value.translation.width
-                let moved = Int((travel / step).rounded())
-                let target = min(max(0, from + moved), browser.tabs.count - 1)
-                if target != index {
-                    withAnimation(Motion.settle) { browser.move(tab, to: target) }
+                // Pins move among pins, titles among titles.
+                let pinned = browser.pinnedCount
+                let low = tab.pin != nil ? 0 : pinned
+                let high = tab.pin != nil ? max(0, pinned - 1) : browser.tabs.count - 1
+                let wanted = min(max(low, from + Int((travel / step).rounded())), high)
+                if wanted != target {
+                    withAnimation(Motion.settle) { target = wanted }
                 }
             }
             .onEnded { _ in
+                // One move and the return of every offset in the same breath:
+                // each tab's place changes by exactly what its offset gives
+                // back, so only the held tab is seen to move — into its slot.
                 withAnimation(Motion.settle) {
+                    browser.move(tab, to: target)
                     dragging = nil
                     travel = 0
                 }
