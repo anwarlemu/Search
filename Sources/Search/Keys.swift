@@ -294,8 +294,14 @@ final class Keys: ObservableObject {
         index()
     }
 
+    /// The two that stand for nine are not in the reverse map: their key is
+    /// a pattern, matched on the digit by the key monitor, and finding the
+    /// 1 here would answer it with nothing — ⌘1 did nothing for a day.
     private func index() {
-        byChord = Dictionary(chords.map { ($0.value, $0.key) }, uniquingKeysWith: { first, _ in first })
+        byChord = Dictionary(
+            chords.filter { $0.key != .tabNumber && $0.key != .profileNumber }.map { ($0.value, $0.key) },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 
     private func save() {
