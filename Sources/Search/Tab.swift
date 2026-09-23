@@ -45,7 +45,18 @@ enum Web {
         // on this older switch, which has no public name.
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
         config.mediaTypesRequiringUserActionForPlayback = .audio
-        if Store.testing, !Store.measuring { config.preferences.inactiveSchedulingPolicy = .none }
+        // A page not on screen keeps running, slowly, rather than being
+        // stopped. WebKit's own default suspends the process of a view that
+        // is out of its window, and a page suspended for an hour comes back
+        // with its connections dead and its state stale — a mail client
+        // reconnecting, a feed fetching itself again — which is what "the
+        // tab takes ages to come back" was, worst for the pinned tabs that
+        // never sleep. Throttled, a page ticks over the way a background tab
+        // does in Chrome. The cost is bounded: a loose tab left half an hour
+        // sleeps outright (Sleep.swift), and the pinned ones are the few
+        // somebody keeps for the day. A test run drives hidden tabs at full
+        // speed instead.
+        config.preferences.inactiveSchedulingPolicy = Store.testing && !Store.measuring ? .none : .throttle
         return config
     }
 }
