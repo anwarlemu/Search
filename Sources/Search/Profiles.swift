@@ -40,25 +40,29 @@ extension Browser {
         askProfileName("New profile") { [weak self] name in self?.addProfile(named: name) }
     }
 
-    func renameProfile() {
-        askProfileName("Rename profile", current: profileNames[profile]) { [weak self] name in
-            guard let self else { return }
-            renameProfile(profile, to: name)
+    /// The one on screen, or any by index.
+    func renameProfile(_ index: Int? = nil) {
+        let which = index ?? profile
+        guard profileNames.indices.contains(which) else { return }
+        askProfileName("Rename profile", current: profileNames[which]) { [weak self] name in
+            self?.renameProfile(which, to: name)
         }
     }
 
-    /// The one on screen, after a word: its tabs close with it.
-    func deleteCurrentProfile() {
-        guard profileNames.count > 1 else { return }
+    func deleteCurrentProfile() { askToDelete(profile) }
+
+    /// After a word: its tabs close with it.
+    func askToDelete(_ index: Int) {
+        guard profileNames.count > 1, profileNames.indices.contains(index) else { return }
         let alert = NSAlert()
-        alert.messageText = "Delete “\(profileNames[profile])”?"
-        let count = tabs.filter { !$0.isBlank && !$0.bench }.count
+        alert.messageText = "Delete “\(profileNames[index])”?"
+        let count = tabCount(in: index)
         alert.informativeText = count == 0 ? "It has no tabs." : count == 1 ? "Its one tab closes." : "Its \(count) tabs close."
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
         let finish: (NSApplication.ModalResponse) -> Void = { [weak self] answer in
             guard answer == .alertFirstButtonReturn, let self else { return }
-            deleteProfile(profile)
+            deleteProfile(index)
         }
         if let window = Links.window {
             alert.beginSheetModal(for: window, completionHandler: finish)

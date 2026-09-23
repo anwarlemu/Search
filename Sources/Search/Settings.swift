@@ -189,6 +189,39 @@ struct SettingsPanel: View {
     // MARK: - tabs
 
     private var tabs: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            tabsCard
+            profiles
+        }
+    }
+
+    /// The profiles: a set of tabs each, with the same sign-ins, history and
+    /// passwords in all of them. Also under Tabs in the menu bar; here is
+    /// where someone looks for it.
+    private var profiles: some View {
+        Card {
+            ForEach(Array(browser.profileNames.enumerated()), id: \.offset) { index, name in
+                if index > 0 { Rule() }
+                Line(name, index == browser.profile ? "The tabs on screen now" : "⌃\(index + 1)") {
+                    HStack(spacing: 6) {
+                        if index != browser.profile {
+                            Pill("Switch") { browser.switchProfile(to: index) }
+                        }
+                        Pill("Rename…") { browser.renameProfile(index) }
+                        if browser.profileNames.count > 1 {
+                            Pill("Delete…") { browser.askToDelete(index) }
+                        }
+                    }
+                }
+            }
+            Rule()
+            Line("New profile", "Another set of tabs — the same sign-ins, history and passwords. ⌃1, ⌃2 … switch between them.") {
+                Pill("Add…", filled: true) { browser.newProfile() }
+            }
+        }
+    }
+
+    private var tabsCard: some View {
         Card {
             Line("Tabs in a sidebar", "Down the left instead of across the top. Pull its edge to make it wider; double-click the edge to reset.") {
                 Switch(on: Binding(

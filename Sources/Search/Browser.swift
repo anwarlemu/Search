@@ -44,6 +44,11 @@ final class Browser: NSObject, ObservableObject {
     }
     private var parked: [Int: Parked] = [:]
 
+    /// How many pages a profile holds — not blank tabs, not the bench's.
+    func tabCount(in index: Int) -> Int {
+        (index == profile ? tabs : parked[index]?.tabs ?? []).filter { !$0.isBlank && !$0.bench }.count
+    }
+
     /// A tab by id, in whichever profile it is.
     func tab(_ id: Tab.ID) -> Tab? {
         tabs.first { $0.id == id } ?? parked.values.lazy.compactMap { $0.tabs.first { $0.id == id } }.first
