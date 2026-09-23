@@ -329,6 +329,8 @@ struct SideBar: View {
                 .popover(isPresented: $browser.bookmarksOpen, arrowEdge: .trailing) {
                     BookmarksDropdown(browser: browser, bookmarks: browser.bookmarks)
                 }
+            ProfileDoor(browser: browser)
+                .padding(.leading, 4)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)

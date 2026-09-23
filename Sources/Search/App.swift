@@ -108,6 +108,30 @@ struct SearchApp: App {
                 Button("Search Tabs…") { browser.summon() }
                     .keyboardShortcut("k")
                 Divider()
+                Section("Profiles") {
+                    // ⌃1 to ⌃9 are taken in the key monitor below, before any
+                    // page sees them; the shortcut here is for the eye.
+                    ForEach(Array(browser.profileNames.enumerated()), id: \.offset) { index, name in
+                        let on = Binding(get: { browser.profile == index }, set: { _ in browser.switchProfile(to: index) })
+                        if index < 9, let key = "\(index + 1)".first {
+                            Toggle(name, isOn: on)
+                                .keyboardShortcut(KeyEquivalent(key), modifiers: .control)
+                        } else {
+                            Toggle(name, isOn: on)
+                        }
+                    }
+                    Button("Previous Profile") { browser.stepProfile(-1) }
+                        .keyboardShortcut("[", modifiers: [.command, .option])
+                        .disabled(browser.profileNames.count < 2)
+                    Button("Next Profile") { browser.stepProfile(1) }
+                        .keyboardShortcut("]", modifiers: [.command, .option])
+                        .disabled(browser.profileNames.count < 2)
+                    Button("New Profile…") { browser.newProfile() }
+                    Button("Rename Profile…") { browser.renameProfile() }
+                    Button("Delete Profile…") { browser.deleteCurrentProfile() }
+                        .disabled(browser.profileNames.count < 2)
+                }
+                Divider()
                 if let tab = browser.active {
                     if tab.pin == nil {
                         Button("Pin Tab") { browser.pin(tab) }
@@ -728,6 +752,19 @@ struct ContentView: View {
         // none of ours use those.
         if #available(macOS 15.4, *), !flags.intersection([.command, .option, .control]).isEmpty,
            Extensions.shared.take(event) {
+            return true
+        }
+
+        // ⌃1 to ⌃9: the profiles, in order.
+        if flags == .control, let number = Int(key), (1...9).contains(number) {
+            browser.switchProfile(to: number - 1)
+            return true
+        }
+        // ⌥⌘[ and ⌥⌘]: the profile before and the one after. Taken here
+        // rather than left to the menu: with ⌥ down the keyboard reports a
+        // different character for the bracket, and the menu misses it.
+        if flags == [.command, .option], key == "[" || key == "]" {
+            browser.stepProfile(key == "]" ? 1 : -1)
             return true
         }
 

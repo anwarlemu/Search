@@ -29,6 +29,99 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - profiles
+
+    /// The profiles' names, in order. Each is a set of tabs and nothing
+    /// more: sign-ins, history, passwords and extensions are the same in
+    /// every one. See Profiles.swift.
+    @Published private(set) var profileNames: [String] = [Session.firstName]
+    /// Which one is on screen — its tabs are `tabs`.
+    @Published private(set) var profile = 0
+    /// The tabs of the others, by index: asleep, holding no web view.
+    struct Parked {
+        var tabs: [Tab]
+        var active: Tab.ID?
+    }
+    private var parked: [Int: Parked] = [:]
+
+    /// A tab by id, in whichever profile it is.
+    func tab(_ id: Tab.ID) -> Tab? {
+        tabs.first { $0.id == id } ?? parked.values.lazy.compactMap { $0.tabs.first { $0.id == id } }.first
+    }
+
+    /// The tab, on screen — switching profile first if it is in another.
+    func reveal(_ tab: Tab) {
+        if !tabs.contains(where: { $0.id == tab.id }),
+           let index = parked.first(where: { $0.value.tabs.contains { $0.id == tab.id } })?.key {
+            switchProfile(to: index)
+        }
+        select(tab)
+    }
+
+    /// ⌥⌘[ and ⌥⌘], or a name from the list. The tabs on screen go to sleep
+    /// where they are — history and a picture kept, no web view — and the
+    /// other profile's come back the way a session does at launch: in place
+    /// at once, and loaded only when looked at.
+    func switchProfile(to index: Int) {
+        guard index != profile, profileNames.indices.contains(index) else { return }
+        cancelTabEdit()
+        closeFind()
+        if veiling { toggleHiding() }
+        summoning = false
+        suggesting = nil
+        editing = false
+        typed = ""
+        let leaving = tabs
+        parked[profile] = Parked(tabs: leaving, active: activeID)
+        let coming = parked.removeValue(forKey: index)
+        profile = index
+        var list = coming?.tabs ?? []
+        if list.isEmpty {
+            let tab = Tab()
+            prepare(tab)
+            list = [tab]
+        }
+        tabs = list
+        activeID = coming.flatMap { came in list.first { $0.id == came.active }?.id } ?? list.first?.id
+        if let tab = active {
+            tab.touch()
+            if !tab.wake() { tab.revive() }
+        }
+        for tab in leaving { sleep(tab, parking: true) }
+        writeSession(now: true)
+        announce(profileNames[index])
+    }
+
+    func stepProfile(_ direction: Int) {
+        guard profileNames.count > 1 else { return }
+        switchProfile(to: (profile + direction + profileNames.count) % profileNames.count)
+    }
+
+    /// A new one, empty, and straight into it.
+    func addProfile(named name: String) {
+        profileNames.append(name)
+        switchProfile(to: profileNames.count - 1)
+    }
+
+    func renameProfile(_ index: Int, to name: String) {
+        guard profileNames.indices.contains(index) else { return }
+        profileNames[index] = name
+        writeSession(now: true)
+    }
+
+    /// Its tabs close with it. Never the last one: a browser always has a
+    /// set of tabs, even an empty one.
+    func deleteProfile(_ index: Int) {
+        guard profileNames.count > 1, profileNames.indices.contains(index) else { return }
+        if index == profile { switchProfile(to: index == 0 ? 1 : index - 1) }
+        parked.removeValue(forKey: index)?.tabs.forEach { $0.close() }
+        // Everything after it moves up one.
+        parked = Dictionary(uniqueKeysWithValues: parked.map { ($0.key > index ? $0.key - 1 : $0.key, $0.value) })
+        profileNames.remove(at: index)
+        if profile > index { profile -= 1 }
+        writeSession(now: true)
+    }
+
     /// Everything there is to set. Held here so the whole window redraws when
     /// one of them changes.
     let prefs = Preferences()
@@ -689,22 +782,18 @@ final class Browser: NSObject, ObservableObject {
             // meant to dismiss it.
             let came = self.floating
             self.land()
-            if let came, let tab = self.tabs.first(where: { $0.id == came }) {
-                self.select(tab)
+            if let came, let tab = self.tab(came) {
+                self.reveal(tab)
             }
             NSApp.activate(ignoringOtherApps: true)
             NSApp.windows.first { $0.contentView != nil }?.makeKeyAndOrderFront(nil)
         }
         floater.onSkip = { [weak self] seconds in
-            guard let self, let id = self.floating,
-                  let tab = self.tabs.first(where: { $0.id == id })
-            else { return }
+            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
             tab.web.evaluateJavaScript(Isolate.skip(seconds))
         }
         floater.onProgress = { [weak self] answer in
-            guard let self, let id = self.floating,
-                  let tab = self.tabs.first(where: { $0.id == id })
-            else { return }
+            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
             tab.web.evaluateJavaScript(Isolate.where_) { found, _ in
                 MainActor.assumeIsolated {
                     guard let pair = found as? [Any], pair.count == 2,
@@ -716,9 +805,7 @@ final class Browser: NSObject, ObservableObject {
             }
         }
         floater.onPlayPause = { [weak self] answer in
-            guard let self, let id = self.floating,
-                  let tab = self.tabs.first(where: { $0.id == id })
-            else { return }
+            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
             tab.web.evaluateJavaScript(Isolate.toggle) { playing, _ in
                 MainActor.assumeIsolated { answer((playing as? Bool) ?? true) }
             }
@@ -735,7 +822,32 @@ final class Browser: NSObject, ObservableObject {
         }
 
         let saved = Session.read()
-        guard !saved.tabs.isEmpty else {
+        let spaces = saved.profiles.isEmpty
+            ? [Session.Space(name: Session.firstName, tabs: [], active: 0)]
+            : saved.profiles
+        profileNames = spaces.map(\.name)
+        profile = min(max(0, saved.current), spaces.count - 1)
+        // Every profile's tabs are objects from the start — a line each, no
+        // web view — so switching to one is a swap of arrays and nothing
+        // is read from disk again.
+        for (index, space) in spaces.enumerated() {
+            var restored: [Tab] = []
+            for entry in space.tabs {
+                guard let url = URL(string: entry.url) else { continue }
+                let tab = Tab()
+                prepare(tab)
+                tab.restore(url: url, title: entry.title)
+                tab.pin = entry.pin
+                restored.append(tab)
+            }
+            if index == profile {
+                tabs = restored
+            } else if !restored.isEmpty {
+                let here = min(max(0, space.active), restored.count - 1)
+                parked[index] = Parked(tabs: restored, active: restored[here].id)
+            }
+        }
+        guard !tabs.isEmpty else {
             // A blank tab costs nothing until it is asked for its page. Its
             // web view — and with it WebKit's helper processes — is built a
             // moment after the window is up, so that the first address typed
@@ -749,19 +861,7 @@ final class Browser: NSObject, ObservableObject {
             }
             return
         }
-        for entry in saved.tabs {
-            guard let url = URL(string: entry.url) else { continue }
-            let tab = Tab()
-            prepare(tab)
-            tab.restore(url: url, title: entry.title)
-            tab.pin = entry.pin
-            tabs.append(tab)
-        }
-        guard !tabs.isEmpty else {
-            adopt(Tab())
-            return
-        }
-        let here = min(max(0, saved.active), tabs.count - 1)
+        let here = min(max(0, spaces[profile].active), tabs.count - 1)
         activeID = tabs[here].id
         // Only the one you were looking at actually loads.
         tabs[here].wake()
@@ -853,22 +953,24 @@ final class Browser: NSObject, ObservableObject {
     }
 
     private func writeSession(now: Bool = false) {
-        Session.write(
-            now: now,
-            .init(
-                tabs: tabs.compactMap { tab in
-                    guard !tab.shy, !tab.bench else { return nil }
-                    // A sleeping tab holds its address in `pending`; asking for
-                    // it there too means a pin can never be written out of
-                    // existence by whatever its web view happens to be showing.
-                    guard let url = tab.pending ?? tab.address,
-                          url.scheme?.hasPrefix("http") == true
-                    else { return nil }
-                    return Session.Entry(url: url.absoluteString, title: tab.title, pin: tab.pin)
-                },
-                active: tabs.firstIndex { $0.id == activeID } ?? 0
-            )
-        )
+        let spaces = profileNames.indices.map { index -> Session.Space in
+            let list = index == profile ? tabs : (parked[index]?.tabs ?? [])
+            let front = index == profile ? activeID : parked[index]?.active
+            var entries: [Session.Entry] = []
+            var active = 0
+            for tab in list where !tab.shy && !tab.bench {
+                // A sleeping tab holds its address in `pending`; asking for
+                // it there too means a pin can never be written out of
+                // existence by whatever its web view happens to be showing.
+                guard let url = tab.pending ?? tab.address, url.scheme?.hasPrefix("http") == true else { continue }
+                // Counted among what is written: a private tab in front of
+                // it is not in the file, so it is not in the count.
+                if tab.id == front { active = entries.count }
+                entries.append(Session.Entry(url: url.absoluteString, title: tab.title, pin: tab.pin))
+            }
+            return Session.Space(name: profileNames[index], tabs: entries, active: active)
+        }
+        Session.write(now: now, .init(profiles: spaces, current: profile))
     }
 
     private func rememberSession() {
@@ -1264,7 +1366,7 @@ final class Browser: NSObject, ObservableObject {
         // The window closes whatever else is true. Tying that to the bookkeeping
         // is how a little window outlives the thing that opened it.
         if floater.showing { floater.drop() }
-        guard let id = floating, let tab = tabs.first(where: { $0.id == id }) else { return }
+        guard let id = floating, let tab = tab(id) else { return }
         floating = nil
         tab.floating = false
         tab.web.evaluateJavaScript(Isolate.off)

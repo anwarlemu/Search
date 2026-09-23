@@ -354,6 +354,8 @@ final class Bench {
                 "offering": browser.offering != nil,
                 "asking": browser.asking.map { "\($0.host) \($0.wants)" } ?? "",
                 "bare": browser.prefs.bare,
+                "profiles": browser.profileNames,
+                "profile": browser.profile,
                 "modal": NSApp.modalWindow.map { "\(type(of: $0)) “\($0.title)”" } ?? "",
                 "look": browser.prefs.look.rawValue,
                 "appearance": NSApp.appearance?.name.rawValue ?? "system",
@@ -430,6 +432,8 @@ final class Bench {
             let special: [String: (UInt16, String)] = ["tab": (48, "\t"), "esc": (53, "\u{1B}"), "return": (36, "\r")]
             let (code, chars) = special[key] ?? (Bench.keyCode(for: first), key)
             window.makeKeyAndOrderFront(nil)
+            // Addressed to the window: a key equivalent is the window's to
+            // hand to the menu, and one with no window reaches no menu.
             for type in [NSEvent.EventType.keyDown, .keyUp] {
                 guard let event = NSEvent.keyEvent(
                     with: type, location: .zero, modifierFlags: flags,
@@ -446,6 +450,7 @@ final class Bench {
                     "index": browser.tabs.firstIndex { $0.id == browser.activeID } ?? -1,
                     "field": browser.editing,
                     "bare": browser.prefs.bare,
+                    "profile": browser.profile,
                 ])
             }
 
@@ -544,6 +549,9 @@ final class Bench {
             if let look = (request["look"] as? String).flatMap(Look.init) { browser.prefs.look = look }
             if let on = request["sidebar"] as? Bool { browser.prefs.sidebar = on }
             if let yes = request["allow"] as? Bool { yes ? browser.allowCapture() : browser.denyCapture() }
+            if let index = request["profile"] as? Int { browser.switchProfile(to: index) }
+            if let name = request["newProfile"] as? String { browser.addProfile(named: name) }
+            if let index = request["deleteProfile"] as? Int { browser.deleteProfile(index) }
             if #available(macOS 15.4, *), let on = request["extensions"] as? Bool { Extensions.shared.menuOpen = on }
             answer(["ok": true])
 

@@ -1,8 +1,9 @@
 import Foundation
 
-// What was open last time. A list of addresses and their names, and which one
-// you were looking at — nothing else, because everything else is either on the
-// page or in the history file next door.
+// What was open last time: each profile's addresses and their names, which
+// one you were looking at in each, and which profile was in front — nothing
+// else, because everything else is either on the page or in the history file
+// next door.
 
 enum Session {
     struct Entry: Codable {
@@ -11,23 +12,41 @@ enum Session {
         var pin: String?
     }
 
-    struct Shape: Codable {
+    /// One profile: its tabs, and which of them was in front.
+    struct Space: Codable {
+        var name: String
         var tabs: [Entry]
         var active: Int
     }
 
+    struct Shape: Codable {
+        var profiles: [Space]
+        var current: Int
+    }
+
+    /// The file from before there were profiles: one set of tabs. Still
+    /// read, so an update loses nobody their tabs; never written again.
+    private struct Old: Codable {
+        var tabs: [Entry]
+        var active: Int
+    }
+
+    /// What the one profile everybody starts with is called.
+    static let firstName = "Main"
+
     private static var file: URL { Store.file("session.json") }
 
     static func read() -> Shape {
-        guard let data = try? Data(contentsOf: file) else { return Shape(tabs: [], active: 0) }
-        guard let shape = try? JSONDecoder().decode(Shape.self, from: data) else {
-            // A file that's there but won't decode is not the same as no
-            // file: something wrote it, and overwriting it on the next save
-            // without a trace is how yesterday's tabs actually disappear.
-            Store.quarantine(file)
-            return Shape(tabs: [], active: 0)
+        guard let data = try? Data(contentsOf: file) else { return Shape(profiles: [], current: 0) }
+        if let shape = try? JSONDecoder().decode(Shape.self, from: data) { return shape }
+        if let old = try? JSONDecoder().decode(Old.self, from: data) {
+            return Shape(profiles: [Space(name: firstName, tabs: old.tabs, active: old.active)], current: 0)
         }
-        return shape
+        // A file that's there but won't decode is not the same as no
+        // file: something wrote it, and overwriting it on the next save
+        // without a trace is how yesterday's tabs actually disappear.
+        Store.quarantine(file)
+        return Shape(profiles: [], current: 0)
     }
 
     /// `now` writes on the calling thread. Quitting doesn't wait for a

@@ -112,7 +112,9 @@ def main(argv):
     elif verb == "ui":
         if len(args) != 2: sys.exit("usage: bench ui KEY VALUE")
         key, value = args
-        request[key] = value if key == "look" else value in ("on", "true", "1", "yes")
+        if key in ("look", "newProfile"): request[key] = value
+        elif key in ("profile", "deleteProfile"): request[key] = int(value)
+        else: request[key] = value in ("on", "true", "1", "yes")
     elif verb in ("ext-add", "ext-press", "ext-remove", "ext-reload"):
         if len(args) != 1: sys.exit(f"usage: bench {verb} ID")
         request["id"] = args[0]

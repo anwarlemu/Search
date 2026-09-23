@@ -62,9 +62,12 @@ extension Browser {
 
     /// Why a tab has to stay awake — nil when nothing keeps it. The clock is
     /// the caller's business; this is everything else.
-    func awake(because tab: Tab) -> String? {
-        if tab.id == activeID { return "on screen" }
-        if tab.pin != nil { return "pinned" }
+    ///
+    /// `parking` is a profile being switched away from: on screen and
+    /// pinned no longer mean anything there, and everything else still does.
+    func awake(because tab: Tab, parking: Bool = false) -> String? {
+        if !parking, tab.id == activeID { return "on screen" }
+        if !parking, tab.pin != nil { return "pinned" }
         if tab.bench { return "a bench tab" }
         if tab.isBlank { return "blank" }
         if tab.asleep { return "already asleep" }
@@ -82,8 +85,8 @@ extension Browser {
     /// Asks the page whether it holds anything typed, pictures it, then lets
     /// it go — looking again at each step, since each takes a moment and you
     /// may have gone back to the tab in the meantime.
-    func sleep(_ tab: Tab, done: ((String) -> Void)? = nil) {
-        if let reason = awake(because: tab) {
+    func sleep(_ tab: Tab, parking: Bool = false, done: ((String) -> Void)? = nil) {
+        if let reason = awake(because: tab, parking: parking) {
             done?(reason)
             return
         }
@@ -93,13 +96,13 @@ extension Browser {
                 done?("holding something typed")
                 return
             }
-            if let reason = self.awake(because: tab) {
+            if let reason = self.awake(because: tab, parking: parking) {
                 done?(reason)
                 return
             }
             tab.snapshot { [weak self, weak tab] picture in
                 guard let self, let tab else { return }
-                if let reason = self.awake(because: tab) {
+                if let reason = self.awake(because: tab, parking: parking) {
                     done?(reason)
                     return
                 }

@@ -29,7 +29,13 @@ struct TabBar: View {
             ZStack(alignment: .leading) {
                 // The empty half of the strip is what you grab to move the
                 // window; the tabs keep the run they sit on.
-                DragStrip(reserved: Metrics.lights + run(in: geo.size.width) + Metrics.tabGap + Metrics.plusWidth, trailing: Metrics.helm + 26 + 24)
+                DragStrip(
+                    reserved: Metrics.lights + run(in: geo.size.width) + Metrics.tabGap + Metrics.plusWidth,
+                    // The doors as measured, once they have been: extension
+                    // buttons and the profile's pill widen them, and a click
+                    // on either must not pick the window up.
+                    trailing: (doors > 0 ? doors : Metrics.helm + 26) + 24
+                )
                 // And the corner the lights sit in, which is title bar too —
                 // the one stretch left to take hold of when tabs fill the row.
                 DragStrip()
@@ -111,6 +117,8 @@ struct TabBar: View {
                     // Back, forward, reload, and the bookmarks, at the far end
                     // of the row. The dropdown hangs from the last one.
                     HStack(spacing: Metrics.tabGap) {
+                        ProfileDoor(browser: browser)
+                            .padding(.trailing, 6)
                         ExtensionSlot()
                         Helm(browser: browser)
                             .padding(.trailing, 8)

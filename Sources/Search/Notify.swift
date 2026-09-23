@@ -80,9 +80,8 @@ enum Notify {
             let id = response.notification.request.content.userInfo["tab"] as? String
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    if let id, let browser = Clicks.shared.browser,
-                       let tab = browser.tabs.first(where: { $0.id.uuidString == id }) {
-                        browser.select(tab)
+                    if let id = id.flatMap(UUID.init), let browser = Clicks.shared.browser, let tab = browser.tab(id) {
+                        browser.reveal(tab)
                         NSApp.activate(ignoringOtherApps: true)
                         Links.window?.makeKeyAndOrderFront(nil)
                     }
