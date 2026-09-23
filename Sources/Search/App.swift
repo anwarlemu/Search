@@ -312,6 +312,13 @@ struct ContentView: View {
                 TabBar(browser: browser)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
+            // With the tabs put away, the lights' corner is still there to
+            // take hold of the window by.
+            if browser.prefs.bare, browser.active?.immersed != true {
+                DragStrip()
+                    .frame(width: Metrics.lights, height: Metrics.strip)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .ignoresSafeArea()
         .animation(Motion.glide, value: browser.prefs.sidebar)
@@ -623,8 +630,14 @@ struct ContentView: View {
         window.titleVisibility = .hidden
         window.backgroundColor = Palette.NS.ground
         // The strip does the dragging, so the page underneath can't be grabbed
-        // by accident while selecting text.
+        // by accident while selecting text — and the window's own dragging is
+        // off altogether. With the title bar hidden, AppKit still treats the
+        // top of the window as one: a press on any see-through view there
+        // that nothing claimed moved the window. The tabs sit in a scroll
+        // view whose views claim nothing, so dragging a tab dragged the
+        // window. The strips move the window themselves and don't need this.
         window.isMovableByWindowBackground = false
+        window.isMovable = false
         // Where you left it, at the size you left it. A test run keeps its
         // own: the name lives in the app's standard defaults, which every
         // copy shares, and a probe resized for a test once changed the size

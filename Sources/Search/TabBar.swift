@@ -8,10 +8,6 @@ struct TabBar: View {
 
     @Namespace private var pill
 
-    /// Which tab is under the hand, where it started, and how far it has come.
-    @State private var dragging: Tab.ID?
-    @State private var from = 0
-    @State private var travel: CGFloat = 0
     @State private var landing = false
     /// The plus only comes out when the pointer is in the row.
     @State private var nearby = false
@@ -48,46 +44,14 @@ struct TabBar: View {
                     // it takes the room there is and scrolls inside its own
                     // edges — never under the lights, never over the doors —
                     // keeping the tab you are on in view.
-                    ScrollViewReader { reader in
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: Metrics.tabGap) {
-                                ForEach(Array(browser.tabs.enumerated()), id: \.element.id) { index, tab in
-                                    // A pinned square moves among pinned squares, a title
-                                    // among titles: each has its own stride.
-                                    let step = (tab.pin != nil ? Metrics.pinWidth : width(in: geo.size.width)) + Metrics.tabGap
-                                    let held = dragging == tab.id
-                                    TabPill(
-                                        browser: browser,
-                                        prefs: browser.prefs,
-                                        tab: tab,
-                                        live: tab.id == browser.activeID,
-                                        width: width(in: geo.size.width),
-                                        room: geo.size.width - Metrics.lights - 12,
-                                        pill: pill,
-                                        close: { browser.close(tab) }
-                                    )
-                                    // The row reflows around it while the pill itself keeps
-                                    // up with the hand: what it has travelled, less the
-                                    // ground its new place has already given it.
-                                    .offset(x: held ? travel - CGFloat(index - from) * step : 0)
-                                    .zIndex(held ? 1 : 0)
-                                    .shadow(color: .black.opacity(held ? 0.14 : 0), radius: 12, y: 4)
-                                    // Ahead of the run's own scrolling, which took a
-                                    // sideways drag for itself and left the tab where it
-                                    // was. A click without movement still isn't a drag,
-                                    // so the tap goes on answering at once.
-                                    .highPriorityGesture(reorder(tab: tab, index: index, step: step))
-                                    .id(tab.id)
-                                }
-                            }
-                            .frame(height: Metrics.strip)
-                        }
-                        .scrollDisabled(!overflowing(in: geo.size.width))
-                        .frame(width: run(in: geo.size.width))
-                        .onAppear { reveal(reader, in: geo.size.width) }
-                        .onChange(of: overflowing(in: geo.size.width)) { _, _ in reveal(reader, in: geo.size.width) }
-                        .onChange(of: browser.activeID) { _, _ in reveal(reader, in: geo.size.width, gliding: true) }
-                    }
+                    TabRun(
+                        browser: browser,
+                        pill: pill,
+                        width: width(in: geo.size.width),
+                        room: geo.size.width - Metrics.lights - 12,
+                        run: run(in: geo.size.width),
+                        overflowing: overflowing(in: geo.size.width)
+                    )
 
                     // The way to a new page, right after the tabs rather than
                     // at the end of their run, so it is there however far the
@@ -160,44 +124,6 @@ struct TabBar: View {
         .animation(Motion.settle, value: browser.tabs.map(\.id))
     }
 
-    /// Pick a tab up and the others get out of its way as it passes them.
-    private func reorder(tab: Tab, index: Int, step: CGFloat) -> some Gesture {
-        // In the row's space, not the pill's — see the sidebar's grid for why.
-        DragGesture(minimumDistance: 5, coordinateSpace: .named("strip"))
-            .onChanged { value in
-                if dragging != tab.id {
-                    dragging = tab.id
-                    from = index
-                }
-                travel = value.translation.width
-                let moved = Int((travel / step).rounded())
-                let target = min(max(0, from + moved), browser.tabs.count - 1)
-                if target != index {
-                    withAnimation(Motion.settle) { browser.move(tab, to: target) }
-                }
-            }
-            .onEnded { _ in
-                withAnimation(Motion.settle) {
-                    dragging = nil
-                    travel = 0
-                }
-            }
-    }
-
-    /// Brings the tab you are on into view once the run scrolls: at once
-    /// when the window first shows it, on the strip's spring when you pick
-    /// another. A turn of the run loop later, so the run has been laid out.
-    private func reveal(_ reader: ScrollViewProxy, in strip: CGFloat, gliding: Bool = false) {
-        guard overflowing(in: strip), let id = browser.activeID else { return }
-        DispatchQueue.main.async {
-            if gliding {
-                withAnimation(Motion.glide) { reader.scrollTo(id) }
-            } else {
-                reader.scrollTo(id)
-            }
-        }
-    }
-
     /// How wide the run of tabs is: as wide as the tabs while they fit, as
     /// wide as the room there is once they don't.
     private func run(in strip: CGFloat) -> CGFloat {
@@ -242,6 +168,113 @@ struct TabBar: View {
         let spent = pinned * Metrics.pinWidth
             + CGFloat(max(0, browser.tabs.count - 1)) * Metrics.tabGap
         return max(Metrics.tabMinWidth, min(Metrics.tabWidth, (room(in: strip) - spent) / loose))
+    }
+}
+
+/// The tabs, in a run of their own. While they fit, it is exactly as wide as
+/// they are and nothing about the row changes. Past what the window holds at
+/// their narrowest it takes the room there is and scrolls inside its own edges
+/// — never under the lights, never over the doors — keeping the tab you are
+/// on in view.
+private struct TabRun: View {
+    @ObservedObject var browser: Browser
+    let pill: Namespace.ID
+    /// What a loose tab gets, the room a field growing over the strip gets,
+    /// and the width of the run itself.
+    let width: CGFloat
+    let room: CGFloat
+    let run: CGFloat
+    let overflowing: Bool
+
+    /// Which tab is under the hand, where it started, and how far it has come.
+    @State private var dragging: Tab.ID?
+    @State private var from = 0
+    @State private var travel: CGFloat = 0
+
+    var body: some View {
+        ScrollViewReader { reader in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Metrics.tabGap) {
+                    ForEach(Array(browser.tabs.enumerated()), id: \.element.id) { index, tab in
+                        // A pinned square moves among pinned squares, a title
+                        // among titles: each has its own stride.
+                        let step = (tab.pin != nil ? Metrics.pinWidth : width) + Metrics.tabGap
+                        let held = dragging == tab.id
+                        TabPill(
+                            browser: browser,
+                            prefs: browser.prefs,
+                            tab: tab,
+                            live: tab.id == browser.activeID,
+                            width: width,
+                            room: room,
+                            pill: pill,
+                            close: { browser.close(tab) }
+                        )
+                        // The row reflows around it while the pill itself keeps
+                        // up with the hand: what it has travelled, less the
+                        // ground its new place has already given it.
+                        .offset(x: held ? travel - CGFloat(index - from) * step : 0)
+                        .zIndex(held ? 1 : 0)
+                        .shadow(color: .black.opacity(held ? 0.14 : 0), radius: 12, y: 4)
+                        // Ahead of the run's own scrolling. A click without
+                        // movement still isn't a drag, so the tap goes on
+                        // answering at once.
+                        .highPriorityGesture(reorder(tab: tab, index: index, step: step))
+                        .id(tab.id)
+                    }
+                }
+                .frame(height: Metrics.strip)
+            }
+            .scrollDisabled(!overflowing)
+            .frame(width: run)
+            .onAppear { reveal(reader) }
+            .onChange(of: overflowing) { _, _ in reveal(reader) }
+            .onChange(of: browser.activeID) { _, _ in reveal(reader, gliding: true) }
+        }
+        .coordinateSpace(name: "strip")
+        // A link let go of over the tabs opens among them.
+        .onDrop(of: [.url, .text], isTargeted: nil) { providers in browser.take(providers) }
+        .animation(Motion.glide, value: browser.activeID)
+        .animation(Motion.glide, value: browser.editingTab)
+        .animation(Motion.settle, value: browser.tabs.map(\.id))
+    }
+
+    /// Pick a tab up and the others get out of its way as it passes them.
+    private func reorder(tab: Tab, index: Int, step: CGFloat) -> some Gesture {
+        // In the row's space, not the pill's — see the sidebar's grid for why.
+        DragGesture(minimumDistance: 5, coordinateSpace: .named("strip"))
+            .onChanged { value in
+                if dragging != tab.id {
+                    dragging = tab.id
+                    from = index
+                }
+                travel = value.translation.width
+                let moved = Int((travel / step).rounded())
+                let target = min(max(0, from + moved), browser.tabs.count - 1)
+                if target != index {
+                    withAnimation(Motion.settle) { browser.move(tab, to: target) }
+                }
+            }
+            .onEnded { _ in
+                withAnimation(Motion.settle) {
+                    dragging = nil
+                    travel = 0
+                }
+            }
+    }
+
+    /// Brings the tab you are on into view once the run scrolls: at once
+    /// when the window first shows it, on the strip's spring when you pick
+    /// another. A turn of the run loop later, so the run has been laid out.
+    private func reveal(_ reader: ScrollViewProxy, gliding: Bool = false) {
+        guard overflowing, let id = browser.activeID else { return }
+        DispatchQueue.main.async {
+            if gliding {
+                withAnimation(Motion.glide) { reader.scrollTo(id) }
+            } else {
+                reader.scrollTo(id)
+            }
+        }
     }
 }
 
