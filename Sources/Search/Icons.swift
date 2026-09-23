@@ -109,7 +109,8 @@ final class Favicons {
                 }
                 let candidates = Favicons.rank(declared, page: url, dark: wantDark)
                 let shy = tab?.shy ?? false
-                Task { await self.download(candidates, host: host, key: key, shy: shy) }
+                let jar = tab?.built?.configuration.websiteDataStore.httpCookieStore
+                Task { await self.download(candidates, host: host, key: key, shy: shy, jar: jar) }
             }
         }
     }
@@ -126,15 +127,29 @@ final class Favicons {
         return .any
     }
 
-    private func download(_ candidates: [URL], host: String, key: String, shy: Bool) async {
+    /// Asked with the page's own cookies. A site behind a sign-in — a
+    /// preview behind Vercel's, a company's own tools — keeps its icon
+    /// behind it too, and asked without them it answers with its sign-in
+    /// page: not an image, so the tab wore a letter (dev.trykyo.com, 24 Sep
+    /// 2026). The cookies are read from the page's own store, for the
+    /// icon's own address only, and go nowhere else.
+    private func download(_ candidates: [URL], host: String, key: String, shy: Bool, jar: WKHTTPCookieStore?) async {
         defer { busy.remove(host) }
+        let cookies = await jar?.allCookies() ?? []
         let session = URLSession(configuration: {
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = 8
+            // Each request carries only the cookies its own address would.
+            config.httpShouldSetCookies = false
             return config
         }())
         for candidate in candidates {
-            guard let (data, response) = try? await session.data(from: candidate),
+            var request = URLRequest(url: candidate)
+            let mine = cookies.filter { Favicons.cookie($0, goesTo: candidate) }
+            for (field, value) in HTTPCookie.requestHeaderFields(with: mine) {
+                request.setValue(value, forHTTPHeaderField: field)
+            }
+            guard let (data, response) = try? await session.data(for: request),
                   (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true,
                   data.count > 60, data.count < 2_000_000
             else { continue }
@@ -147,6 +162,19 @@ final class Favicons {
         // Not asked again this session: hammering a site for an icon it
         // doesn't have is exactly the kind of thing a quiet browser doesn't do.
         missing.insert(host)
+    }
+
+    /// Whether a browser would send this cookie to this address: its domain
+    /// matches the host, its path is under the address's, and a secure one
+    /// only over https.
+    private static func cookie(_ cookie: HTTPCookie, goesTo url: URL) -> Bool {
+        guard let host = url.host()?.lowercased() else { return false }
+        if cookie.isSecure, url.scheme != "https" { return false }
+        let domain = cookie.domain.lowercased()
+        let bare = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+        guard host == bare || host.hasSuffix("." + bare) else { return false }
+        let path = url.path().isEmpty ? "/" : url.path()
+        return path.hasPrefix(cookie.path)
     }
 
     /// Decoded and drawn into a square off the main thread — an .ico can hold
