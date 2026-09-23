@@ -239,9 +239,11 @@ struct SettingsPanel: View {
                     "Offer passkeys",
                     prefs.passkeysPossible
                         ? "Touch ID or an iCloud passkey, on sites that offer one"
-                        : "Needs an Apple entitlement this build doesn't have — off keeps sites to the password"
+                        : "Needs an Apple entitlement this build doesn't have — sites are kept to the password"
                 ) {
                     Switch(on: $prefs.passkeys)
+                        .disabled(!prefs.passkeysPossible)
+                        .opacity(prefs.passkeysPossible ? 1 : 0.4)
                 }
                 if !Vault.never.isEmpty {
                     Rule()
@@ -361,6 +363,8 @@ struct SettingsPanel: View {
                 Shortcut("⌘T  ⌘W  ⇧⌘T", "New, close, reopen tab")
                 Rule()
                 Shortcut("⇧⌘S", "Tabs in a sidebar")
+                Rule()
+                Shortcut("⌃1  ⌃2 …", "Profiles")
                 Rule()
                 Shortcut("⇧⌘R", "Reload without the cache")
                 Rule()

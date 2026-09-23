@@ -131,18 +131,21 @@ final class Preferences: ObservableObject {
         glyph = store.string(forKey: "glyph").flatMap(Glyph.init) ?? .letters
         sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
         shielded = store.object(forKey: "shield") as? Bool ?? true
-        // Offered by default only in a build that can actually do them —
-        // one with Apple's browser entitlement and its profile embedded. A
-        // choice made while they couldn't work is not a choice about them:
-        // the first run of a build that can offers them, whatever was set
-        // before; from then on the switch is the person's.
+        // Offered only in a build that can actually do them — one with
+        // Apple's browser entitlement and its profile embedded. A choice made
+        // while they couldn't work is not a choice about them: the first run
+        // of a build that can offers them, whatever was set before; from then
+        // on the switch is the person's. And a build that can't never offers
+        // them, whatever a build that could had left on: a site shown the
+        // passkey object asks for one, WebKit refuses it on the spot, and the
+        // site reports a sign-in that "was cancelled" (23 Sep 2026).
         let entitled = Preferences.entitledToPasskeys
         passkeysPossible = entitled
         if entitled, !store.bool(forKey: "passkeys.entitled") {
             passkeys = true
             store.set(true, forKey: "passkeys")
         } else {
-            passkeys = store.object(forKey: "passkeys") as? Bool ?? entitled
+            passkeys = entitled && (store.object(forKey: "passkeys") as? Bool ?? true)
         }
         store.set(entitled, forKey: "passkeys.entitled")
         // A test run downloads into its own folder: ~/Downloads would have
