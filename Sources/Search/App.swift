@@ -57,7 +57,8 @@ struct SearchApp: App {
                     set: { _ in browser.toggleSidebar() }
                 ))
                 .keyboardShortcut(browser.keys.menu(.sidebar))
-                Button(browser.prefs.bare ? "Show Tabs" : "Hide Tabs") { browser.toggleBare() }
+                Button(browser.prefs.bare ? "Show Sidebar" : "Hide Sidebar") { browser.toggleBare() }
+                    .disabled(!browser.prefs.sidebar)
                     .keyboardShortcut(browser.keys.menu(.hideTabs))
                 Picker("Tabs Wear", selection: Binding(
                     get: { browser.prefs.glyph },
@@ -315,21 +316,42 @@ struct ContentView: View {
                 }
             }
 
-            if !browser.prefs.sidebar, !browser.prefs.bare, browser.active?.immersed != true {
+            if !browser.prefs.sidebar, browser.active?.immersed != true {
                 TabBar(browser: browser)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-            // With the tabs put away, the lights' corner is still there to
-            // take hold of the window by.
-            if browser.prefs.bare, browser.active?.immersed != true {
+            // With the column put away, the lights' corner is still there to
+            // take hold of the window by, and the left edge brings the
+            // column out over the page for as long as the pointer is on it.
+            if tucked {
                 DragStrip()
                     .frame(width: Metrics.lights, height: Metrics.strip)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 0) {
+                    Color.clear
+                        .frame(width: 6)
+                        .frame(maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                        .onHover { if $0 { browser.peeking = true } }
+                        .padding(.top, Metrics.strip)
+                    Spacer(minLength: 0)
+                }
+                if browser.peeking {
+                    HStack(spacing: 0) {
+                        SideBar(browser: browser, prefs: browser.prefs)
+                            .background(Palette.ground)
+                            .shadow(color: .black.opacity(0.18), radius: 24, x: 6)
+                            .onHover { if !$0 { browser.peeking = false } }
+                        Spacer(minLength: 0)
+                    }
+                    .transition(.move(edge: .leading))
+                }
             }
         }
         .ignoresSafeArea()
         .animation(Motion.glide, value: browser.prefs.sidebar)
         .animation(Motion.glide, value: browser.prefs.bare)
+        .animation(Motion.settle, value: browser.peeking)
         .animation(.easeOut(duration: 0.12), value: browser.active?.immersed)
     }
 
@@ -600,12 +622,18 @@ struct ContentView: View {
         browser.prefs.sidebar && !browser.prefs.bare && browser.active?.immersed != true
     }
 
+    /// The column put away with ⌘S. Only a column can be: tabs across the
+    /// top stay where they are.
+    private var tucked: Bool {
+        browser.prefs.sidebar && browser.prefs.bare && browser.active?.immersed != true
+    }
+
     /// The column has its own corner for the lights, so the page beside it
     /// starts at the very top; the strip needs a band.
     private var band: CGFloat {
         // With the tabs put away the page has the top too; the lights sit
         // over its corner, as they do over a full-screen page.
-        guard browser.active?.immersed != true, !browser.prefs.bare else { return 0 }
+        guard browser.active?.immersed != true else { return 0 }
         return browser.prefs.sidebar ? 0 : Metrics.strip
     }
 

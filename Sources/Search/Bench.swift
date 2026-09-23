@@ -354,6 +354,7 @@ final class Bench {
                 "offering": browser.offering != nil,
                 "asking": browser.asking.map { "\($0.host) \($0.wants)" } ?? "",
                 "bare": browser.prefs.bare,
+                "peeking": browser.peeking,
                 "profiles": browser.profileNames,
                 "profile": browser.profile,
                 "modal": NSApp.modalWindow.map { "\(type(of: $0)) “\($0.title)”" } ?? "",
@@ -569,6 +570,7 @@ final class Bench {
             if let on = request["sidebar"] as? Bool { browser.prefs.sidebar = on }
             if let yes = request["allow"] as? Bool { yes ? browser.allowCapture() : browser.denyCapture() }
             if let index = request["profile"] as? Int { browser.switchProfile(to: index) }
+            if let on = request["peek"] as? Bool { browser.peeking = on }
             if let name = request["record"] as? String, let command = Keys.Command(rawValue: name) { browser.keys.recording = .command(command) }
             if let name = request["newProfile"] as? String { browser.addProfile(named: name) }
             if let index = request["deleteProfile"] as? Int { browser.deleteProfile(index) }

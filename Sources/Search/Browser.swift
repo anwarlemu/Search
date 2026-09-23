@@ -182,6 +182,8 @@ final class Browser: NSObject, ObservableObject {
     let prefs = Preferences()
     /// Every shortcut, and the keys they answer to. See Keys.swift.
     let keys = Keys()
+    /// The tucked-away column, out over the page while the pointer is on it.
+    @Published var peeking = false
     /// The settings panel.
     @Published var tuning = false
     /// The first-launch walk-through, over everything. Also from the menu.
@@ -233,6 +235,9 @@ final class Browser: NSObject, ObservableObject {
 
     /// ⌥⌘S. The tabs put away, or brought back.
     func toggleBare() {
+        // Only the column tucks away; tabs across the top have nowhere to go.
+        guard prefs.sidebar else { return }
+        peeking = false
         withAnimation(Motion.glide) { prefs.bare.toggle() }
     }
 

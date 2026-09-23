@@ -173,7 +173,7 @@ final class Keys: ObservableObject {
             case .actualSize: return "Actual size"
             case .inspector: return "Web inspector"
             case .sidebar: return "Tabs in a sidebar"
-            case .hideTabs: return "Hide or show the tabs"
+            case .hideTabs: return "Hide or show the sidebar"
             case .settings: return "Settings"
             case .passwords: return "Passwords"
             case .welcome: return "Welcome"
@@ -226,7 +226,7 @@ final class Keys: ObservableObject {
             case .actualSize: return "cmd+0"
             case .inspector: return "opt+cmd+i"
             case .sidebar: return "shift+cmd+s"
-            case .hideTabs: return "opt+cmd+s"
+            case .hideTabs: return "cmd+s"
             case .settings: return "cmd+,"
             case .passwords: return "opt+cmd+l"
             case .welcome: return nil
