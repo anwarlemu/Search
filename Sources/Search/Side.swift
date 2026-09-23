@@ -32,9 +32,13 @@ struct SideBar: View {
     @State private var pinTarget = 0
     @State private var pinTravel: CGSize = .zero
 
-    private static let row: CGFloat = 28
+    /// Sized for reading at a glance, as a column of pages ought to be: a
+    /// row about as tall as Arc's, with a title and icon to match. The
+    /// strip across the top stays compact, since it has a window's width to
+    /// share.
+    static let row: CGFloat = 34
     private static let gap: CGFloat = 2
-    private static let square: CGFloat = 34
+    private static let square: CGFloat = 42
     private static let pinGap: CGFloat = 4
 
     var body: some View {
@@ -366,8 +370,8 @@ private struct PinSquare: View {
     @ObservedObject var tab: Tab
     let live: Bool
     let pill: Namespace.ID
-    var width: CGFloat = 34
-    var height: CGFloat = 34
+    var width: CGFloat = 42
+    var height: CGFloat = 42
 
     @State private var hovering = false
 
@@ -381,26 +385,26 @@ private struct PinSquare: View {
             if browser.editingPin == tab.id {
                 PinField(browser: browser, tab: tab)
             } else if prefs.glyph == .icons, let icon = tab.icon {
-                Mark(icon: icon, letter: tab.pin ?? "", size: scale * 16 / 34, dim: tab.asleep)
+                Mark(icon: icon, letter: tab.pin ?? "", size: scale * 18 / 42, dim: tab.asleep)
             } else {
                 Text(tab.pin ?? "")
-                    .font(.system(size: scale * 12 / 34, weight: .medium))
+                    .font(.system(size: scale * 14 / 42, weight: .medium))
                     .foregroundStyle((live ? Palette.ink : Palette.muted).opacity(tab.asleep ? 0.45 : 1))
             }
         }
-        .frame(width: scale * 16 / 34, height: scale * 16 / 34)
+        .frame(width: scale * 18 / 42, height: scale * 18 / 42)
         .frame(width: width, height: height)
         .background {
             if live {
-                RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
+                RoundedRectangle(cornerRadius: scale * 10 / 42, style: .continuous)
                     .fill(Palette.wash)
                     .matchedGeometryEffect(id: "live", in: pill)
             } else {
-                RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
+                RoundedRectangle(cornerRadius: scale * 10 / 42, style: .continuous)
                     .fill(hovering ? Palette.hover : Palette.wash.opacity(0.55))
             }
         }
-        .contentShape(RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: scale * 10 / 42, style: .continuous))
         .modifier(OneClick(double: live) {
             if live { browser.editLetter(tab) } else { browser.select(tab) }
         })
@@ -427,13 +431,13 @@ private struct SideRow: View {
     private var editing: Bool { browser.editingTab == tab.id }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             if editing {
                 TabAddressField(browser: browser)
-                    .frame(height: 16)
+                    .frame(height: 18)
             } else {
                 if prefs.glyph == .icons, !tab.isBlank {
-                    Mark(icon: tab.icon, letter: tab.monogram, size: 15)
+                    Mark(icon: tab.icon, letter: tab.monogram, size: 16)
                 }
                 if tab.bench {
                     // A script's tab, not yours.
@@ -447,7 +451,7 @@ private struct SideRow: View {
                         .foregroundStyle(colour.opacity(0.7))
                 }
                 Text(tab.label)
-                    .font(.system(size: 12.5))
+                    .font(.system(size: 13.5))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .foregroundStyle(colour)
@@ -458,9 +462,9 @@ private struct SideRow: View {
             ZStack {
                 if hovering, !editing {
                     Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Palette.muted)
-                        .frame(width: 15, height: 15)
+                        .frame(width: 18, height: 18)
                         .background(Palette.ink.opacity(0.07), in: Circle())
                         .transition(.opacity)
                 } else if tab.loading {
@@ -472,12 +476,12 @@ private struct SideRow: View {
                         .transition(.opacity)
                 }
             }
-            .frame(width: editing ? 0 : 15, height: 15)
+            .frame(width: editing ? 0 : 18, height: 18)
             .opacity(editing ? 0 : 1)
             .overlay {
                 if !editing {
                     Color.clear
-                        .frame(width: 30, height: 28)
+                        .frame(width: 32, height: 34)
                         .contentShape(Rectangle())
                         .onTapGesture { if hovering { close() } }
                 }
@@ -486,9 +490,9 @@ private struct SideRow: View {
             .animation(Motion.quick, value: tab.loading)
             .animation(Motion.quick, value: tab.noisy)
         }
-        .padding(.leading, 10)
-        .padding(.trailing, editing ? 10 : 7)
-        .frame(height: 28)
+        .padding(.leading, 11)
+        .padding(.trailing, editing ? 11 : 8)
+        .frame(height: SideBar.row)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background { ground }
         .modifier(Shake(travel: shake))
@@ -545,16 +549,16 @@ struct Quiet: View {
 
     var body: some View {
         Button(action: act) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .font(.system(size: 10, weight: .medium))
-                    .frame(width: 15)
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: 16)
                 Text(title)
-                    .font(.system(size: 12.5))
+                    .font(.system(size: 13.5))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(hovering ? Palette.ink.opacity(0.7) : Palette.faint)
-            .padding(.leading, 10)
+            .padding(.leading, 11)
             .frame(height: height)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
