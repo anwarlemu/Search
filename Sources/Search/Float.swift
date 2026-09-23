@@ -82,6 +82,13 @@ final class Float {
         // inside it instead of sizing the window. It comes back on landing.
         (page as? WKWebView)?.allowsMagnification = false
 
+        // The ground goes into the panel before the page goes into the
+        // ground, so the page moves from one window straight into another.
+        // Put into a view with no window first, WebKit's own remote views —
+        // the autofill list over a sign-in box is one — noted no window and
+        // then refused the panel when it came on screen: an assertion inside
+        // AppKit, and the crash of 23 Sep 2026.
+        panel.contentView = ground
         page.removeFromSuperview()
         page.frame = ground.bounds
         page.autoresizingMask = [.width, .height]
@@ -100,7 +107,6 @@ final class Float {
         ground.addSubview(controls)
         self.controls = controls
 
-        panel.contentView = ground
         panel.orderFrontRegardless()
         self.panel = panel
 
