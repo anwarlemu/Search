@@ -673,6 +673,18 @@ final class Browser: NSObject, ObservableObject {
         writeSession(now: true)
     }
 
+    /// ⇧⌘D. The tab on screen pinned, or a pinned one let back into the row.
+    func togglePin() {
+        guard let tab = active, !tab.isBlank else { return }
+        if tab.pin == nil {
+            pin(tab)
+            announce("Pinned — ⇧⌘D again to unpin")
+        } else {
+            unpin(tab)
+            announce("Unpinned")
+        }
+    }
+
     /// Change Letter, or a double-click on the square itself.
     func editLetter(_ tab: Tab) {
         guard tab.pin != nil else { return }

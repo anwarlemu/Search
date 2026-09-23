@@ -135,10 +135,12 @@ struct SearchApp: App {
                 if let tab = browser.active {
                     if tab.pin == nil {
                         Button("Pin Tab") { browser.pin(tab) }
+                            .keyboardShortcut("d", modifiers: [.command, .shift])
                             .disabled(tab.isBlank)
                     } else {
                         Button("Change Letter") { browser.editLetter(tab) }
                         Button("Unpin Tab") { browser.unpin(tab) }
+                            .keyboardShortcut("d", modifiers: [.command, .shift])
                     }
                 }
                 Button("Duplicate Tab") { browser.duplicate() }
@@ -799,6 +801,8 @@ struct ContentView: View {
             browser.copyAddress()
         case "d" where !shifted:
             browser.duplicate()
+        case "d" where shifted:
+            browser.togglePin()
         case "n" where shifted:
             browser.newShyTab()
         case "y" where !shifted:

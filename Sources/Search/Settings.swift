@@ -395,6 +395,8 @@ struct SettingsPanel: View {
                 Rule()
                 Shortcut("⌘T  ⌘W  ⇧⌘T", "New, close, reopen tab")
                 Rule()
+                Shortcut("⇧⌘D", "Pin or unpin the tab")
+                Rule()
                 Shortcut("⇧⌘S", "Tabs in a sidebar")
                 Rule()
                 Shortcut("⌃1  ⌃2 …", "Profiles")
