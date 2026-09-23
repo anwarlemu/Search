@@ -14,9 +14,50 @@ final class Browser: NSObject, ObservableObject {
             // The tab just left is the tab just looked at. Whether a tab has
             // gone unwatched long enough to sleep is counted from here, not
             // from when it was first picked.
-            guard oldValue != activeID, let old = oldValue else { return }
+            // Not while ⌃Tab is walking: the tabs passed through on the way
+            // were not looked at, and the walk settles the stamps itself.
+            guard oldValue != activeID, let old = oldValue, walk == nil else { return }
             tabs.first { $0.id == old }?.touch()
         }
+    }
+
+    // MARK: - ⌃Tab
+
+    /// The tabs in the order last looked at, taken when a ⌃Tab walk begins
+    /// and kept until ⌃ is let go, so the walk goes down one list rather
+    /// than one that reorders under it.
+    private var walk: [Tab.ID]?
+    private var walkAt = 0
+    private var walkFrom: Tab.ID?
+
+    /// ⌃Tab and ⌃⇧Tab: the tab looked at before this one, then the one
+    /// before that, for as long as ⌃ is held — most recent first, the way
+    /// ⌘Tab walks apps. Letting go of ⌃ ends the walk where it stopped.
+    func walkTabs(_ direction: Int) {
+        if walk == nil {
+            let recent = tabs.filter { !$0.bench && $0.id != activeID }
+                .sorted { $0.touched > $1.touched }
+                .map(\.id)
+            // The one on screen first, whatever its stamp says.
+            let list = (activeID.map { [$0] } ?? []) + recent
+            guard list.count > 1 else { return }
+            walk = list
+            walkAt = 0
+            walkFrom = activeID
+        }
+        guard let list = walk else { return }
+        walkAt = (walkAt + direction + list.count) % list.count
+        if let tab = tabs.first(where: { $0.id == list[walkAt] }) { select(tab) }
+    }
+
+    /// ⌃ let go of. The tab the walk left is the one looked at before the
+    /// one it landed on; the ones passed through on the way were not.
+    func landWalk() {
+        guard walk != nil else { return }
+        walk = nil
+        if let from = walkFrom, from != activeID, let tab = tabs.first(where: { $0.id == from }) { tab.touch() }
+        walkFrom = nil
+        active?.touch()
     }
 
     /// The tab whose page is currently out in the little window. Nothing
@@ -1049,7 +1090,7 @@ final class Browser: NSObject, ObservableObject {
         if floating == tab.id { land() }
         leaving()
         activeID = tab.id
-        tab.touch()
+        if walk == nil { tab.touch() }
         // A tab brought back from last time, or waking from ⌘W while pinned,
         // opens the moment you look at it — and only if there was nothing to
         // wake is this the other case, one whose page quietly died while you

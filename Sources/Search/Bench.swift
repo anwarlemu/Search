@@ -419,6 +419,23 @@ final class Bench {
                 answer(["error": "press needs a key"])
                 return
             }
+            /// A flagsChanged with nothing down: the modifiers let go of.
+            func letGo() {
+                guard let event = NSEvent.keyEvent(
+                    with: .flagsChanged, location: .zero, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil,
+                    characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 0
+                ) else { return }
+                NSApp.postEvent(event, atStart: false)
+            }
+            if key == "release" {
+                letGo()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    answer(["index": browser.tabs.firstIndex { $0.id == browser.activeID } ?? -1])
+                }
+                return
+            }
             var flags: NSEvent.ModifierFlags = []
             for name in (request["mods"] as? String ?? "").split(separator: ",") {
                 switch name {
@@ -444,6 +461,8 @@ final class Bench {
                 ) else { continue }
                 NSApp.postEvent(event, atStart: false)
             }
+            // The modifiers come up after the key unless the test holds them.
+            if !(request["hold"] as? Bool ?? false) { letGo() }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 answer([
                     "active": browser.active.map(Bench.short) ?? "",
