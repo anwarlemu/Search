@@ -21,34 +21,34 @@ struct SearchApp: App {
             // One window. Tabs are the only kind of "new" there is.
             CommandGroup(replacing: .newItem) {
                 Button("New Tab") { browser.newTab() }
-                    .keyboardShortcut("t")
+                    .keyboardShortcut(browser.keys.menu(.newTab))
                 Button("New Private Tab") { browser.newShyTab() }
-                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                    .keyboardShortcut(browser.keys.menu(.newPrivateTab))
                 Button("Reopen Closed Tab") { browser.reopen() }
-                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .keyboardShortcut(browser.keys.menu(.reopenTab))
                     .disabled(browser.ghosts.isEmpty)
                 Divider()
                 Button("Open Address…") { browser.edit() }
-                    .keyboardShortcut("l")
+                    .keyboardShortcut(browser.keys.menu(.address))
                 Divider()
                 Button("Close Tab") { if let tab = browser.active { browser.close(tab) } }
-                    .keyboardShortcut("w")
+                    .keyboardShortcut(browser.keys.menu(.closeTab))
             }
             CommandGroup(replacing: .printItem) {
                 Button("Print…") { browser.printPage() }
-                    .keyboardShortcut("p")
+                    .keyboardShortcut(browser.keys.menu(.print))
                     .disabled(browser.active?.isBlank ?? true)
             }
             CommandGroup(after: .pasteboard) {
                 Divider()
                 Button("Find on Page…") { browser.openFind() }
-                    .keyboardShortcut("f")
+                    .keyboardShortcut(browser.keys.menu(.findOnPage))
                     .disabled(browser.active?.isBlank ?? true)
                 Button("Find Next") { browser.look(forward: true) }
-                    .keyboardShortcut("g")
+                    .keyboardShortcut(browser.keys.menu(.findNext))
                     .disabled(!browser.finding)
                 Button("Find Previous") { browser.look(forward: false) }
-                    .keyboardShortcut("g", modifiers: [.command, .shift])
+                    .keyboardShortcut(browser.keys.menu(.findPrevious))
                     .disabled(!browser.finding)
             }
             CommandGroup(replacing: .toolbar) {
@@ -56,9 +56,9 @@ struct SearchApp: App {
                     get: { browser.prefs.sidebar },
                     set: { _ in browser.toggleSidebar() }
                 ))
-                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .keyboardShortcut(browser.keys.menu(.sidebar))
                 Button(browser.prefs.bare ? "Show Tabs" : "Hide Tabs") { browser.toggleBare() }
-                    .keyboardShortcut("s", modifiers: [.command, .option])
+                    .keyboardShortcut(browser.keys.menu(.hideTabs))
                 Picker("Tabs Wear", selection: Binding(
                     get: { browser.prefs.glyph },
                     set: { browser.prefs.glyph = $0 }
@@ -69,64 +69,66 @@ struct SearchApp: App {
                 }
                 Divider()
                 Button("Reload Page") { browser.reload() }
-                    .keyboardShortcut("r")
+                    .keyboardShortcut(browser.keys.menu(.reload))
                 Button("Reload Without Cache") { browser.hardReload() }
-                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .keyboardShortcut(browser.keys.menu(.hardReload))
                     .disabled(browser.active?.isBlank ?? true)
                 Button("Reading Mode") { browser.toggleReader() }
+                    .keyboardShortcut(browser.keys.menu(.readingMode))
                 Button("Float Video") { browser.toggleFloat() }
-                    .keyboardShortcut("p", modifiers: [.command, .shift])
+                    .keyboardShortcut(browser.keys.menu(.floatVideo))
                 Divider()
                 Button("Hide Elements…") { browser.toggleHiding() }
-                    .keyboardShortcut("h", modifiers: [.command, .shift])
+                    .keyboardShortcut(browser.keys.menu(.hideElements))
                 Button("Hidden on This Site…") { browser.reviewing.toggle() }
-                    .keyboardShortcut("u", modifiers: [.command, .shift])
+                    .keyboardShortcut(browser.keys.menu(.hiddenHere))
                 Divider()
                 Button("Zoom In") { browser.zoom(by: 1.1) }
-                    .keyboardShortcut("+")
+                    .keyboardShortcut(browser.keys.menu(.zoomIn))
                 Button("Zoom Out") { browser.zoom(by: 1 / 1.1) }
-                    .keyboardShortcut("-")
+                    .keyboardShortcut(browser.keys.menu(.zoomOut))
                 Button("Actual Size") { browser.resetZoom() }
-                    .keyboardShortcut("0")
+                    .keyboardShortcut(browser.keys.menu(.actualSize))
                 Divider()
                 Button("Show Web Inspector") { browser.inspect() }
-                    .keyboardShortcut("i", modifiers: [.command, .option])
+                    .keyboardShortcut(browser.keys.menu(.inspector))
                     .disabled(browser.active?.isBlank ?? true)
             }
             CommandMenu("Tabs") {
                 Button("Back") { browser.back() }
-                    .keyboardShortcut("[")
+                    .keyboardShortcut(browser.keys.menu(.back))
                     .disabled(browser.active?.canGoBack != true)
                 Button("Forward") { browser.forward() }
-                    .keyboardShortcut("]")
+                    .keyboardShortcut(browser.keys.menu(.forward))
                     .disabled(browser.active?.canGoForward != true)
                 Divider()
                 Button("Next Tab") { browser.step(1) }
-                    .keyboardShortcut("]", modifiers: [.command, .shift])
+                    .keyboardShortcut(browser.keys.menu(.nextTab))
                 Button("Previous Tab") { browser.step(-1) }
-                    .keyboardShortcut("[", modifiers: [.command, .shift])
+                    .keyboardShortcut(browser.keys.menu(.previousTab))
                 Button("Search Tabs…") { browser.summon() }
-                    .keyboardShortcut("k")
+                    .keyboardShortcut(browser.keys.menu(.switchTab))
                 Divider()
                 Section("Profiles") {
-                    // ⌃1 to ⌃9 are taken in the key monitor below, before any
-                    // page sees them; the shortcut here is for the eye.
+                    // Every key here is taken in the key monitor below, before
+                    // any page sees it; the shortcut on the item is for the eye.
                     ForEach(Array(browser.profileNames.enumerated()), id: \.offset) { index, name in
                         let on = Binding(get: { browser.profile == index }, set: { _ in browser.switchProfile(to: index) })
-                        if index < 9, let key = "\(index + 1)".first {
+                        if index < 9 {
                             Toggle(name, isOn: on)
-                                .keyboardShortcut(KeyEquivalent(key), modifiers: .control)
+                                .keyboardShortcut(browser.keys.menu(.profileNumber, digit: index + 1))
                         } else {
                             Toggle(name, isOn: on)
                         }
                     }
                     Button("Previous Profile") { browser.stepProfile(-1) }
-                        .keyboardShortcut("[", modifiers: [.command, .option])
+                        .keyboardShortcut(browser.keys.menu(.previousProfile))
                         .disabled(browser.profileNames.count < 2)
                     Button("Next Profile") { browser.stepProfile(1) }
-                        .keyboardShortcut("]", modifiers: [.command, .option])
+                        .keyboardShortcut(browser.keys.menu(.nextProfile))
                         .disabled(browser.profileNames.count < 2)
                     Button("New Profile…") { browser.newProfile() }
+                        .keyboardShortcut(browser.keys.menu(.newProfile))
                     Button("Rename Profile…") { browser.renameProfile() }
                     Button("Delete Profile…") { browser.deleteCurrentProfile() }
                         .disabled(browser.profileNames.count < 2)
@@ -135,33 +137,35 @@ struct SearchApp: App {
                 if let tab = browser.active {
                     if tab.pin == nil {
                         Button("Pin Tab") { browser.pin(tab) }
-                            .keyboardShortcut("d", modifiers: [.command, .shift])
+                            .keyboardShortcut(browser.keys.menu(.pinTab))
                             .disabled(tab.isBlank)
                     } else {
                         Button("Change Letter") { browser.editLetter(tab) }
                         Button("Unpin Tab") { browser.unpin(tab) }
-                            .keyboardShortcut("d", modifiers: [.command, .shift])
+                            .keyboardShortcut(browser.keys.menu(.pinTab))
                     }
                 }
                 Button("Duplicate Tab") { browser.duplicate() }
-                    .keyboardShortcut("d")
+                    .keyboardShortcut(browser.keys.menu(.duplicate))
                     .disabled(browser.active?.isBlank ?? true)
                 Button("Copy Address") { browser.copyAddress() }
-                    .keyboardShortcut("c", modifiers: [.command, .shift])
+                    .keyboardShortcut(browser.keys.menu(.copyAddress))
                     .disabled(browser.active?.isBlank ?? true)
                 Button("Paste and Go") { browser.pasteAndGo() }
-                    .keyboardShortcut("v", modifiers: [.command, .shift])
+                    .keyboardShortcut(browser.keys.menu(.pasteAndGo))
                 Divider()
                 Button("Close Other Tabs") { if let tab = browser.active { browser.closeOthers(but: tab) } }
+                    .keyboardShortcut(browser.keys.menu(.closeOthers))
                     .disabled(browser.tabs.count < 2)
                 Button("Stop Sound in Tab") { browser.pauseMedia() }
-                    .keyboardShortcut("m", modifiers: [.command, .shift])
+                    .keyboardShortcut(browser.keys.menu(.muteTab))
             }
             CommandMenu("Bookmarks") {
                 Button("Add This Page") { browser.bookmarkCurrent() }
-                    .keyboardShortcut("b", modifiers: [.command, .shift])
+                    .keyboardShortcut(browser.keys.menu(.bookmark))
                     .disabled(browser.active?.isBlank ?? true)
                 Button("Show Bookmarks…") { browser.bookmarking = true }
+                    .keyboardShortcut(browser.keys.menu(.bookmarks))
                 Divider()
                 BookmarkTree(nodes: browser.bookmarks.roots) { browser.visit($0) }
             }
@@ -188,18 +192,19 @@ struct SearchApp: App {
                 }
                 Divider()
                 Button("Show History…") { browser.recalling = true }
-                    .keyboardShortcut("y")
+                    .keyboardShortcut(browser.keys.menu(.history))
                 Button("Downloads…") { browser.hoarding = true }
-                    .keyboardShortcut("j", modifiers: [.command, .shift])
+                    .keyboardShortcut(browser.keys.menu(.downloads))
                 Divider()
                 Button("Clear History") { browser.clearHistory() }
             }
             CommandGroup(after: .appSettings) {
                 Button("Settings…") { browser.tuning = true }
-                    .keyboardShortcut(",")
+                    .keyboardShortcut(browser.keys.menu(.settings))
                 Button("Welcome…") { browser.welcoming = true }
+                    .keyboardShortcut(browser.keys.menu(.welcome))
                 Button("Passwords…") { browser.managing = true }
-                    .keyboardShortcut("l", modifiers: [.command, .option])
+                    .keyboardShortcut(browser.keys.menu(.passwords))
             }
             CommandGroup(replacing: .help) {
                 Button("Send Feedback…") { Links.writeFeedback() }
@@ -683,7 +688,12 @@ struct ContentView: View {
                 // ⌘ let go of ends a ⌘K walk, ⌃ let go of a ⌃Tab walk —
                 // wherever each stopped.
                 if !event.modifierFlags.contains(.command) { browser.landSummon() }
-                if !event.modifierFlags.contains(.control) { browser.landWalk() }
+                if let held = browser.keys.chord(for: .recentTab),
+                   (held.control && !event.modifierFlags.contains(.control))
+                    || (held.option && !event.modifierFlags.contains(.option))
+                    || (held.command && !event.modifierFlags.contains(.command)) {
+                    browser.landWalk()
+                }
                 return event
             }
             return take(event) ? nil : event
@@ -692,7 +702,9 @@ struct ContentView: View {
 
     private func take(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let key = event.charactersIgnoringModifiers?.lowercased() ?? ""
+
+        // A key being recorded in Settings › Shortcuts: this press is it.
+        if browser.keys.recording != nil { return browser.keys.record(event) }
 
         // Escape puts the page back. On a blank tab there is no page to put
         // back, so it belongs to whatever else wants it.
@@ -746,14 +758,7 @@ struct ContentView: View {
         // Except while an address is being typed. Then the list under the field
         // is what there is to move through, and Return takes whatever the walk
         // landed on.
-        if event.keyCode == 48, !flags.contains(.command), !flags.contains(.option) {
-            // ⌃Tab and ⌃⇧Tab: the tabs in the order last looked at, from
-            // wherever the caret is — the one key every browser gives to
-            // the row.
-            if flags.contains(.control) {
-                browser.walkTabs(flags.contains(.shift) ? -1 : 1)
-                return true
-            }
+        if event.keyCode == 48, flags.isSubset(of: .shift) {
             if browser.editingTab != nil { return true }
             // Filling something in on the page: the key belongs to the field,
             // which may well be offering a completion to take with it.
@@ -773,55 +778,54 @@ struct ContentView: View {
             return true
         }
 
-        // ⌃1 to ⌃9: the profiles, in order.
-        if flags == .control, let number = Int(key), (1...9).contains(number) {
-            browser.switchProfile(to: number - 1)
+        // Everything else is a key in the map, yours or the app's own.
+        guard let chord = Chord(event: event) else { return false }
+        // ⌘Z while pointing: the last thing hidden comes back. Everywhere
+        // else undo belongs to the page.
+        if chord == Chord(key: "z", command: true), browser.veiling {
+            browser.undoHiding()
             return true
         }
-        // ⌥⌘[ and ⌥⌘]: the profile before and the one after. Taken here
-        // rather than left to the menu: with ⌥ down the keyboard reports a
-        // different character for the bracket, and the menu misses it.
-        if flags == [.command, .option], key == "[" || key == "]" {
-            browser.stepProfile(key == "]" ? 1 : -1)
+        if let command = browser.keys.command(for: chord) {
+            perform(command)
             return true
         }
+        // The nine tabs and the nine profiles: whatever modifiers were
+        // given to the 1 go for 2 to 9 as well. The ninth tab is the last
+        // one, however many there are.
+        if chord.key.count == 1, let digit = Int(chord.key), (1...9).contains(digit) {
+            let one = chord.with(key: "1")
+            if one == browser.keys.chord(for: .tabNumber) {
+                browser.select(index: digit == 9 ? browser.tabs.count - 1 : digit - 1)
+                return true
+            }
+            if one == browser.keys.chord(for: .profileNumber) {
+                browser.switchProfile(to: digit - 1)
+                return true
+            }
+        }
+        if let own = browser.keys.custom(for: chord), let url = Google.destination(for: own.url) {
+            browser.visit(url)
+            return true
+        }
+        // ⌘← and ⌘→, for hands that never learned the brackets.
+        if chord == Chord(key: "left", command: true) { browser.back(); return true }
+        if chord == Chord(key: "right", command: true) { browser.forward(); return true }
+        return false
+    }
 
-        guard flags.contains(.command) else { return false }
-        let shifted = flags.contains(.shift)
-
-        // Anything with ⌥ or ⌃ on top is somebody else's.
-        guard !flags.contains(.option), !flags.contains(.control) else { return false }
-
-        switch key {
-        case "t" where !shifted:
-            browser.newTab()
-        case "t" where shifted:
-            browser.reopen()
-        case "c" where shifted:
-            browser.copyAddress()
-        case "d" where !shifted:
-            browser.duplicate()
-        case "d" where shifted:
-            browser.togglePin()
-        case "n" where shifted:
-            browser.newShyTab()
-        case "y" where !shifted:
-            browser.recalling.toggle()
-        case "j" where shifted:
-            browser.hoarding.toggle()
-        case "v" where shifted:
-            browser.pasteAndGo()
-        case "p" where !shifted:
-            browser.printPage()
-        case "f" where !shifted:
-            browser.openFind()
-        case "g":
-            browser.look(forward: !shifted)
-        case "m" where shifted:
-            browser.pauseMedia()
-        case "p" where shifted:
-            browser.toggleFloat()
-        case "k" where !shifted:
+    /// One of the app's own commands, by name.
+    private func perform(_ command: Keys.Command) {
+        switch command {
+        case .newTab: browser.newTab()
+        case .newPrivateTab: browser.newShyTab()
+        case .reopenTab: browser.reopen()
+        case .closeTab: if let tab = browser.active { browser.close(tab) }
+        case .closeOthers: if let tab = browser.active { browser.closeOthers(but: tab) }
+        case .duplicate: browser.duplicate()
+        case .pinTab: browser.togglePin()
+        case .address: browser.edit()
+        case .switchTab:
             // Held down, ⌘K walks the list a step at a time; letting go of ⌘
             // takes wherever it stopped.
             if browser.editing, !browser.offers.isEmpty {
@@ -829,50 +833,42 @@ struct ContentView: View {
             } else {
                 browser.summon()
             }
-        case "s" where shifted:
-            browser.toggleSidebar()
-        case "b" where shifted:
-            browser.bookmarkCurrent()
-        case "," where !shifted:
-            browser.tuning.toggle()
-        case "h" where shifted:
-            browser.toggleHiding()
-        case "u" where shifted:
-            browser.reviewing.toggle()
-        case "z" where !shifted:
-            // Only while pointing. Everywhere else undo belongs to the page.
-            guard browser.veiling else { return false }
-            browser.undoHiding()
-        // ⌘+ arrives as "=" or "+" depending on the keyboard; both mean bigger.
-        case "=", "+":
-            browser.zoom(by: 1.1)
-        case "-":
-            browser.zoom(by: 1 / 1.1)
-        case "0":
-            browser.resetZoom()
-        case "w" where !shifted:
-            if let tab = browser.active { browser.close(tab) }
-        case "l" where !shifted:
-            browser.edit()
-        case "r" where !shifted:
-            browser.reload()
-        case "r" where shifted:
-            browser.hardReload()
-        case "[":
-            shifted ? browser.step(-1) : browser.back()
-        case "]":
-            shifted ? browser.step(1) : browser.forward()
-        default:
-            // ⌘1 through ⌘9: the ninth is the last one, however many there are.
-            if let number = Int(key), (1...9).contains(number), !shifted {
-                browser.select(index: number == 9 ? browser.tabs.count - 1 : number - 1)
-                return true
-            }
-            // ⌘← and ⌘→, for hands that never learned the brackets.
-            if event.keyCode == 123 { browser.back(); return true }
-            if event.keyCode == 124 { browser.forward(); return true }
-            return false
+        case .tabNumber, .profileNumber: break
+        case .nextTab: browser.step(1)
+        case .previousTab: browser.step(-1)
+        case .recentTab: browser.walkTabs(1)
+        case .recentTabBack: browser.walkTabs(-1)
+        case .back: browser.back()
+        case .forward: browser.forward()
+        case .reload: browser.reload()
+        case .hardReload: browser.hardReload()
+        case .findOnPage: browser.openFind()
+        case .findNext: browser.look(forward: true)
+        case .findPrevious: browser.look(forward: false)
+        case .print: browser.printPage()
+        case .copyAddress: browser.copyAddress()
+        case .pasteAndGo: browser.pasteAndGo()
+        case .bookmark: browser.bookmarkCurrent()
+        case .bookmarks: browser.bookmarking.toggle()
+        case .history: browser.recalling.toggle()
+        case .downloads: browser.hoarding.toggle()
+        case .muteTab: browser.pauseMedia()
+        case .readingMode: browser.toggleReader()
+        case .floatVideo: browser.toggleFloat()
+        case .hideElements: browser.toggleHiding()
+        case .hiddenHere: browser.reviewing.toggle()
+        case .zoomIn: browser.zoom(by: 1.1)
+        case .zoomOut: browser.zoom(by: 1 / 1.1)
+        case .actualSize: browser.resetZoom()
+        case .inspector: browser.inspect()
+        case .sidebar: browser.toggleSidebar()
+        case .hideTabs: browser.toggleBare()
+        case .settings: browser.tuning.toggle()
+        case .passwords: browser.managing.toggle()
+        case .welcome: browser.welcoming.toggle()
+        case .previousProfile: browser.stepProfile(-1)
+        case .nextProfile: browser.stepProfile(1)
+        case .newProfile: browser.newProfile()
         }
-        return true
     }
 }

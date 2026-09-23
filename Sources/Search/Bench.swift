@@ -569,6 +569,7 @@ final class Bench {
             if let on = request["sidebar"] as? Bool { browser.prefs.sidebar = on }
             if let yes = request["allow"] as? Bool { yes ? browser.allowCapture() : browser.denyCapture() }
             if let index = request["profile"] as? Int { browser.switchProfile(to: index) }
+            if let name = request["record"] as? String, let command = Keys.Command(rawValue: name) { browser.keys.recording = .command(command) }
             if let name = request["newProfile"] as? String { browser.addProfile(named: name) }
             if let index = request["deleteProfile"] as? Int { browser.deleteProfile(index) }
             if #available(macOS 15.4, *), let on = request["extensions"] as? Bool { Extensions.shared.menuOpen = on }

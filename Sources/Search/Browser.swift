@@ -171,6 +171,8 @@ final class Browser: NSObject, ObservableObject {
     /// Everything there is to set. Held here so the whole window redraws when
     /// one of them changes.
     let prefs = Preferences()
+    /// Every shortcut, and the keys they answer to. See Keys.swift.
+    let keys = Keys()
     /// The settings panel.
     @Published var tuning = false
     /// The first-launch walk-through, over everything. Also from the menu.
@@ -983,6 +985,9 @@ final class Browser: NSObject, ObservableObject {
         // The window and the menus are drawn from this object; a setting that
         // changes what they show has to be heard here.
         prefs.objectWillChange
+            .sink { [weak self] in self?.objectWillChange.send() }
+            .store(in: &bag)
+        keys.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &bag)
 

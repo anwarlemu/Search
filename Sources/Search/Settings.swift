@@ -15,12 +15,13 @@ struct SettingsPanel: View {
     @State private var page: Page = Page(rawValue: Store.settings.string(forKey: "settings.page") ?? "") ?? .general
 
     enum Page: String, CaseIterable, Identifiable {
-        case general, tabs, extensions, passwords, downloads, privacy, about
+        case general, tabs, keys, extensions, passwords, downloads, privacy, about
         var id: String { rawValue }
         var title: String {
             switch self {
             case .general: return "General"
             case .tabs: return "Tabs"
+            case .keys: return "Shortcuts"
             case .extensions: return "Extensions"
             case .passwords: return "Passwords"
             case .downloads: return "Downloads"
@@ -32,6 +33,7 @@ struct SettingsPanel: View {
             switch self {
             case .general: return "macwindow"
             case .tabs: return "rectangle.split.3x1"
+            case .keys: return "keyboard"
             case .extensions: return "puzzlepiece.extension"
             case .passwords: return "key"
             case .downloads: return "arrow.down.circle"
@@ -133,6 +135,7 @@ struct SettingsPanel: View {
                     switch page {
                     case .general: general
                     case .tabs: tabs
+                    case .keys: ShortcutsPage(browser: browser, keys: browser.keys)
                     case .extensions: ExtensionsPage(browser: browser)
                     case .passwords: passwords
                     case .downloads: downloads
@@ -387,26 +390,6 @@ struct SettingsPanel: View {
                     Pill("Send Feedback") { Links.writeFeedback() }
                 }
             }
-
-            Card {
-                Shortcut("⌘L", "Address")
-                Rule()
-                Shortcut("⌘K", "Switch tab")
-                Rule()
-                Shortcut("⌘T  ⌘W  ⇧⌘T", "New, close, reopen tab")
-                Rule()
-                Shortcut("⇧⌘D", "Pin or unpin the tab")
-                Rule()
-                Shortcut("⇧⌘S", "Tabs in a sidebar")
-                Rule()
-                Shortcut("⌃1  ⌃2 …", "Profiles")
-                Rule()
-                Shortcut("⇧⌘R", "Reload without the cache")
-                Rule()
-                Shortcut("⇧⌘H", "Hide something on this site")
-                Rule()
-                Shortcut("⇧⌘P", "Float the video")
-            }
         }
     }
 
@@ -473,25 +456,6 @@ struct SettingsPanel: View {
     // MARK: - pieces
 
     /// A keystroke and what it does.
-    private struct Shortcut: View {
-        let keys: String
-        let does: String
-        init(_ keys: String, _ does: String) { self.keys = keys; self.does = does }
-
-        var body: some View {
-            HStack {
-                Text(does)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.ink)
-                Spacer()
-                Text(keys)
-                    .font(.system(size: 12, design: .rounded))
-                    .foregroundStyle(Palette.muted)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-        }
-    }
 }
 
 /// A row of choices in a grey track, one of them lifted out in white. The
