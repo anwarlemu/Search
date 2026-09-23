@@ -66,7 +66,11 @@ struct TabBar: View {
                                     .offset(x: held ? travel - CGFloat(index - from) * step : 0)
                                     .zIndex(held ? 1 : 0)
                                     .shadow(color: .black.opacity(held ? 0.14 : 0), radius: 12, y: 4)
-                                    .gesture(reorder(tab: tab, index: index, step: step))
+                                    // Ahead of the run's own scrolling, which took a
+                                    // sideways drag for itself and left the tab where it
+                                    // was. A click without movement still isn't a drag,
+                                    // so the tap goes on answering at once.
+                                    .highPriorityGesture(reorder(tab: tab, index: index, step: step))
                                     .id(tab.id)
                                 }
                             }
