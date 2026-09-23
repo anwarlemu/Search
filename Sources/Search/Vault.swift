@@ -25,6 +25,23 @@ enum Vault {
     /// password saved while trying something never sits among the real ones.
     private static let label = Store.world.map { "Search (\($0))" } ?? "Search"
 
+    /// Every call here is a trip to securityd, and every write a transaction
+    /// on the login keychain file that waits for the disk. On the main
+    /// thread that wait was the window standing still: an import of two
+    /// hundred passwords, or one saved while an extension's rules were being
+    /// compiled beside it, froze it for as long as the commits took
+    /// (23 Sep 2026). So the keychain is spoken to from here, one call at a
+    /// time, and the window hears back on its own thread.
+    static let queue = DispatchQueue(label: "com.officecommun.search.vault", qos: .userInitiated)
+
+    /// `work` off the main thread; its answer handed back on it.
+    static func off<T>(_ work: @escaping () -> T, then done: @escaping (T) -> Void) {
+        queue.async {
+            let answer = work()
+            DispatchQueue.main.async { done(answer) }
+        }
+    }
+
     // MARK: - reading
 
     /// The keychain will list many items, or hand over one secret — not
@@ -138,6 +155,10 @@ enum Vault {
 
     /// It was just used to sign in. Lists put it first from now on.
     static func touch(_ login: Login) {
+        // Once an hour is as often as "last used" needs to move. Each write
+        // is a keychain transaction, and a site that signs you in on every
+        // page was costing one per page.
+        if let used = login.used, Date().timeIntervalSince(used) < 60 * 60 { return }
         save(host: login.host, user: login.user, password: login.password, used: Date())
     }
 

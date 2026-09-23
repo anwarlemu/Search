@@ -255,6 +255,9 @@ final class Browser: NSObject, ObservableObject {
     /// Set once you have picked, so the list doesn't come straight back for
     /// the box you are still in. Cleared when the caret leaves the boxes.
     private var pickedInto: Tab.ID?
+    /// Bumped each time the caret moves, so an answer from the keychain for
+    /// a box the caret has since left is thrown away rather than shown.
+    private var fieldAsk = 0
     /// The list is taken down a beat after the caret leaves, not the same
     /// instant: clicking a row can take the caret out of the page first, and
     /// a list that vanished on the way down would never be clicked.
@@ -264,12 +267,15 @@ final class Browser: NSObject, ObservableObject {
         guard let offer = offering else { return }
         offering = nil
         let login = offer.login
-        guard Vault.save(host: login.host, user: login.user, password: login.password, used: Date()) else {
-            announce("The keychain refused it")
-            return
+        Vault.off({ Vault.save(host: login.host, user: login.user, password: login.password, used: Date()) }) { [weak self] kept in
+            guard let self else { return }
+            guard kept else {
+                announce("The keychain refused it")
+                return
+            }
+            relist()
+            announce(offer.changed ? "Password updated for \(login.host)" : "Password saved for \(login.host)")
         }
-        relist()
-        announce(offer.changed ? "Password updated for \(login.host)" : "Password saved for \(login.host)")
     }
 
     func dropOffer() { offering = nil }
@@ -292,7 +298,7 @@ final class Browser: NSObject, ObservableObject {
         tab.fill(user: login.user, password: login.password) { [weak self] worked in
             if !worked { self?.announce("Couldn't find the sign-in fields anymore") }
         }
-        Vault.touch(login)
+        Vault.queue.async { Vault.touch(login) }
     }
 
     func dropChoice() { suggesting = nil }
@@ -320,20 +326,26 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
-    func relist() { saved = Vault.all() }
+    /// Read off the main thread: every secret is a trip to the keychain of
+    /// its own, and the list is every secret.
+    func relist() {
+        Vault.off({ Vault.all() }) { [weak self] all in self?.saved = all }
+    }
 
     func keep(host: String, user: String, password: String) {
-        guard Vault.save(host: host, user: user, password: password) else {
-            announce("The keychain refused it")
-            return
+        Vault.off({ Vault.save(host: host, user: user, password: password) }) { [weak self] kept in
+            guard let self else { return }
+            guard kept else {
+                announce("The keychain refused it")
+                return
+            }
+            relist()
+            announce("Kept for \(host)")
         }
-        relist()
-        announce("Kept for \(host)")
     }
 
     func forget(_ login: Login) {
-        Vault.forget(host: login.host, user: login.user)
-        relist()
+        Vault.off({ Vault.forget(host: login.host, user: login.user) }) { [weak self] in self?.relist() }
     }
 
     func copy(_ login: Login) {
@@ -346,16 +358,18 @@ final class Browser: NSObject, ObservableObject {
     func took(_ outcome: Result<Chromium.Found, Error>, from source: Chromium.Source) {
         switch outcome {
         case .success(let found):
-            var kept = 0
-            for login in found.logins
-            where Vault.save(host: login.host, user: login.user, password: login.password, used: login.used) {
-                kept += 1
+            // One keychain transaction per password, all of them off the
+            // main thread; the window hears the count when they are done.
+            Vault.off({
+                found.logins.filter { Vault.save(host: $0.host, user: $0.user, password: $0.password, used: $0.used) }.count
+            }) { [weak self] kept in
+                guard let self else { return }
+                var never = Vault.never
+                found.never.forEach { never.insert($0) }
+                Vault.never = never
+                relist()
+                announce(kept == 0 ? "Nothing new in \(source.name)" : "\(kept) passwords from \(source.name)")
             }
-            var never = Vault.never
-            found.never.forEach { never.insert($0) }
-            Vault.never = never
-            relist()
-            announce(kept == 0 ? "Nothing new in \(source.name)" : "\(kept) passwords from \(source.name)")
         case .failure(Chromium.Trouble.noPassphrase):
             announce("\(source.name) didn't give up its keychain key")
         case .failure:
@@ -391,13 +405,15 @@ final class Browser: NSObject, ObservableObject {
             announce("Couldn't read that file as text")
             return
         }
-        let result = Vault.take(csv: text)
-        relist()
-        announce(
-            result.skipped == 0
-                ? "\(result.kept) passwords in the keychain"
-                : "\(result.kept) in the keychain, \(result.skipped) skipped"
-        )
+        Vault.off({ Vault.take(csv: text) }) { [weak self] result in
+            guard let self else { return }
+            relist()
+            announce(
+                result.skipped == 0
+                    ? "\(result.kept) passwords in the keychain"
+                    : "\(result.kept) in the keychain, \(result.skipped) skipped"
+            )
+        }
     }
 
     // MARK: - what is kept, and getting rid of it
@@ -1264,6 +1280,7 @@ final class Browser: NSObject, ObservableObject {
         // its own — the way Safari does it, and what a person expects.
         tab.onField = { [weak self] tab, spot in
             guard let self else { return }
+            fieldAsk += 1
             guard let spot else {
                 if pickedInto == tab.id { pickedInto = nil }
                 guard suggesting?.tab == tab.id else { return }
@@ -1280,8 +1297,11 @@ final class Browser: NSObject, ObservableObject {
             guard prefs.fillsPasswords, tab.id == activeID, pickedInto != tab.id,
                   let host = curtain.host(of: tab.address)
             else { return }
-            let known = Array(Vault.logins(matching: host).prefix(5))
-            suggesting = known.isEmpty ? nil : Suggesting(tab: tab.id, spot: spot, logins: known)
+            let ask = fieldAsk
+            Vault.off({ Array(Vault.logins(matching: host).prefix(5)) }) { [weak self, weak tab] known in
+                guard let self, let tab, ask == fieldAsk, tab.id == activeID, pickedInto != tab.id else { return }
+                suggesting = known.isEmpty ? nil : Suggesting(tab: tab.id, spot: spot, logins: known)
+            }
         }
 
         tab.onCredentials = { [weak self] tab, host, user, password in
@@ -1291,18 +1311,20 @@ final class Browser: NSObject, ObservableObject {
             // A password manager extension that asked Chrome's way to do the
             // saving itself.
             if #available(macOS 15.4, *), Extensions.shared.passwordSavingTakenBy != nil { return }
-            let known = Vault.logins(for: host)
-            // Nothing to ask about one that is already known.
-            if let same = known.first(where: { $0.user == user && $0.password == password }) {
-                Vault.touch(same)
-                return
+            Vault.off({ Vault.logins(for: host) }) { [weak self] known in
+                guard let self else { return }
+                // Nothing to ask about one that is already known.
+                if let same = known.first(where: { $0.user == user && $0.password == password }) {
+                    Vault.queue.async { Vault.touch(same) }
+                    return
+                }
+                let offer = Offer(
+                    login: Login(host: host, user: user, password: password, used: nil),
+                    changed: known.contains { $0.user == user }
+                )
+                guard offering != offer else { return }
+                offering = offer
             }
-            let offer = Offer(
-                login: Login(host: host, user: user, password: password, used: nil),
-                changed: known.contains { $0.user == user }
-            )
-            guard offering != offer else { return }
-            offering = offer
         }
         tab.onPickTrouble = { [weak self] _, reason in
             self?.announce("Couldn't hide that — \(reason)")

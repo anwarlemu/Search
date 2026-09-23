@@ -218,24 +218,27 @@ struct WelcomePanel: View {
             group.enter()
             DispatchQueue.global(qos: .userInitiated).async {
                 let outcome = Result { try Chromium.read(source) }
-                DispatchQueue.main.async {
-                    switch outcome {
-                    case .success(let found):
-                        var kept = 0
-                        for login in found.logins
-                        where Vault.save(host: login.host, user: login.user, password: login.password, used: login.used) {
-                            kept += 1
+                // The keychain takes them on its own queue — one transaction
+                // each, and the welcome would otherwise stand still for all
+                // of them — and the window is told the count afterwards.
+                Vault.queue.async {
+                    let kept = ((try? outcome.get())?.logins ?? []).filter {
+                        Vault.save(host: $0.host, user: $0.user, password: $0.password, used: $0.used)
+                    }.count
+                    DispatchQueue.main.async {
+                        switch outcome {
+                        case .success(let found):
+                            var never = Vault.never
+                            found.never.forEach { never.insert($0) }
+                            Vault.never = never
+                            lines.append("\(kept) passwords")
+                        case .failure(Chromium.Trouble.noPassphrase):
+                            lines.append("passwords: macOS didn't hand over the key — allow it and try again")
+                        case .failure:
+                            lines.append("passwords: nothing readable")
                         }
-                        var never = Vault.never
-                        found.never.forEach { never.insert($0) }
-                        Vault.never = never
-                        lines.append("\(kept) passwords")
-                    case .failure(Chromium.Trouble.noPassphrase):
-                        lines.append("passwords: macOS didn't hand over the key — allow it and try again")
-                    case .failure:
-                        lines.append("passwords: nothing readable")
+                        group.leave()
                     }
-                    group.leave()
                 }
             }
         }
