@@ -90,6 +90,15 @@ final class Browser: NSObject, ObservableObject {
         (index == profile ? tabs : parked[index]?.tabs ?? []).filter { !$0.isBlank && !$0.bench }.count
     }
 
+    /// The next profile round that still holds a page, if any does.
+    func profileWithPages() -> Int? {
+        for step in 1..<max(1, profileNames.count) {
+            let index = (profile + step) % profileNames.count
+            if tabCount(in: index) > 0 { return index }
+        }
+        return nil
+    }
+
     /// A tab by id, in whichever profile it is.
     func tab(_ id: Tab.ID) -> Tab? {
         tabs.first { $0.id == id } ?? parked.values.lazy.compactMap { $0.tabs.first { $0.id == id } }.first
@@ -1119,7 +1128,8 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// ⌘W, or the cross on the tab. Closing the last one leaves a blank tab
-    /// behind; closing that blank tab closes the window.
+    /// behind. Closing that blank tab goes to another profile that still
+    /// has pages; only when no profile has any does it close the window.
     func close(_ tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
 
@@ -1151,7 +1161,11 @@ final class Browser: NSObject, ObservableObject {
 
         if tabs.count == 1 {
             if tab.isBlank {
-                NSApp.keyWindow?.performClose(nil)
+                if let other = profileWithPages() {
+                    switchProfile(to: other)
+                } else {
+                    (Links.window ?? NSApp.keyWindow)?.performClose(nil)
+                }
             } else {
                 let fresh = Tab()
                 remember(tab, at: 0)
