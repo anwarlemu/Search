@@ -193,6 +193,10 @@ final class Tab: ObservableObject, Identifiable {
     var onImageMenu: ((Tab, URL) -> Void)?
     /// "Add to Search" was pressed on the Chrome Web Store page this tab shows.
     var onStoreAdd: ((Tab) -> Void)?
+    /// A page asking to send notifications; a page sending one — the site,
+    /// the title, the body, the tag. See Notify.swift.
+    var onNotifyAsk: ((Tab, String) -> Void)?
+    var onNotify: ((Tab, String, String, String, String) -> Void)?
     /// The extension whose store page has its own "Add to Search" button in
     /// place — so the bar at the bottom of the window doesn't offer it twice.
     @Published var storePlaced: String?
@@ -202,6 +206,7 @@ final class Tab: ObservableObject, Identifiable {
     private let forms = FormRelay()
     private let images = ImageRelay()
     private let shop = StoreRelay()
+    private let bell = NotifyRelay()
     private let ears = AudioWatch()
     private var lastY: Double = 0
 
@@ -294,6 +299,8 @@ final class Tab: ObservableObject, Identifiable {
         controller.removeScriptMessageHandler(forName: FormRelay.name)
         controller.removeScriptMessageHandler(forName: ImageRelay.name)
         controller.removeScriptMessageHandler(forName: StoreRelay.name)
+        controller.removeScriptMessageHandler(forName: NotifyRelay.name)
+        controller.add(bell, name: NotifyRelay.name)
         controller.add(relay, name: ScrollRelay.name)
         controller.add(veils_, name: VeilRelay.name)
         controller.add(images, name: ImageRelay.name)
@@ -340,6 +347,7 @@ final class Tab: ObservableObject, Identifiable {
         forms.tab = self
         images.tab = self
         shop.tab = self
+        bell.tab = self
         ears.watch(web) { [weak self] on in self?.noisy = on }
         return web
     }
@@ -382,9 +390,13 @@ final class Tab: ObservableObject, Identifiable {
     /// pointing mode, and this site's stylesheet of things you have hidden. The
     /// stylesheet goes in before the document has a body, so nothing is ever
     /// seen arriving and then leaving again.
-    func arm(hiding css: String) {
+    ///
+    /// `host` is where the next document is from, for what it may already
+    /// have been told about notifications; the page's own when not given.
+    func arm(hiding css: String, at host: String? = nil) {
         veils = css
         guard let built else { return }
+        let site = host ?? address?.host()?.lowercased()
         let controller = built.configuration.userContentController
         controller.removeAllUserScripts()
         controller.addUserScript(
@@ -410,6 +422,9 @@ final class Tab: ObservableObject, Identifiable {
         controller.addUserScript(
             WKUserScript(source: StoreRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         )
+        controller.addUserScript(
+            WKUserScript(source: Notify.script(permission: Notify.permission(for: site)), injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        )
         if !FormRelay.passkeysOffered {
             controller.addUserScript(
                 WKUserScript(
@@ -428,6 +443,11 @@ final class Tab: ObservableObject, Identifiable {
     /// The same stylesheet, for the page that is already up.
     func applyVeils(_ css: String) {
         built?.evaluateJavaScript(Veiling.style(css))
+    }
+
+    /// The answer to a page's question about notifications, to the page.
+    func answerNotify(_ state: String) {
+        built?.evaluateJavaScript("window.__officeNotify && window.__officeNotify('\(state)')")
     }
 
     func startPicking() { web.evaluateJavaScript("window.__officeVeil && window.__officeVeil.on()") }
@@ -868,6 +888,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.removeScriptMessageHandler(forName: FormRelay.name)
         controller.removeScriptMessageHandler(forName: ImageRelay.name)
         controller.removeScriptMessageHandler(forName: StoreRelay.name)
+        controller.removeScriptMessageHandler(forName: NotifyRelay.name)
         controller.removeAllUserScripts()
         web.onPull = nil
         web.onTouch = nil

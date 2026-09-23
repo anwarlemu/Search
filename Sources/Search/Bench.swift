@@ -351,6 +351,8 @@ final class Bench {
                 "field": browser.editing,
                 "suggesting": browser.suggesting != nil,
                 "offering": browser.offering != nil,
+                "asking": browser.asking.map { "\($0.host) \($0.wants)" } ?? "",
+                "bare": browser.prefs.bare,
                 "modal": NSApp.modalWindow.map { "\(type(of: $0)) “\($0.title)”" } ?? "",
                 "look": browser.prefs.look.rawValue,
                 "appearance": NSApp.appearance?.name.rawValue ?? "system",
@@ -447,6 +449,7 @@ final class Bench {
             if let on = request["hidden"] as? Bool { browser.reviewing = on }
             if let look = (request["look"] as? String).flatMap(Look.init) { browser.prefs.look = look }
             if let on = request["sidebar"] as? Bool { browser.prefs.sidebar = on }
+            if let yes = request["allow"] as? Bool { yes ? browser.allowCapture() : browser.denyCapture() }
             if #available(macOS 15.4, *), let on = request["extensions"] as? Bool { Extensions.shared.menuOpen = on }
             answer(["ok": true])
 

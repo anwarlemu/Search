@@ -476,9 +476,10 @@ final class Browser: NSObject, ObservableObject {
         var id: String { host + wants }
     }
 
-    @Published private(set) var asking: CaptureAsk?
-    private var decide: ((WKPermissionDecision) -> Void)?
-    private var askedAbout = ""
+    @Published var asking: CaptureAsk?
+    /// Notifications ask through the same bar; see Notify.swift.
+    var decide: ((WKPermissionDecision) -> Void)?
+    var askedAbout = ""
 
     func allowCapture() { answerCapture(.grant) }
     func denyCapture() { answerCapture(.deny) }
@@ -1281,6 +1282,10 @@ final class Browser: NSObject, ObservableObject {
         }
         tab.onPickEnd = { [weak self] _ in self?.veiling = false }
         tab.onImageMenu = { [weak self] tab, url in self?.showImageMenu(for: tab, at: url) }
+        tab.onNotifyAsk = { [weak self] tab, host in self?.notifyAsked(tab, host: host) }
+        tab.onNotify = { [weak self] tab, host, title, body, tag in
+            self?.notifyShow(tab, host: host, title: title, body: body, tag: tag)
+        }
         tab.onStoreAdd = { [weak self] tab in self?.addFromStore(tab) }
 
         // The caret in a sign-in box: the accounts kept for this site hang
@@ -1661,7 +1666,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // decided here because here is the last moment before it loads.
         if action.targetFrame?.isMainFrame ?? true, let tab = tab(for: webView) {
             let host = curtain.host(of: url)
-            tab.arm(hiding: curtain.css(on: host))
+            tab.arm(hiding: curtain.css(on: host), at: url.host()?.lowercased())
             // And the blocker, on or off for where it is going.
             Shield.shared.tune(webView.configuration.userContentController, for: host)
         }
