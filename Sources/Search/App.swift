@@ -751,23 +751,18 @@ struct ContentView: View {
             return true
         }
 
-        // Tab walks the row and comes round to the first again; ⇧Tab walks it
-        // the other way. Other browsers give Tab to the page — here the row is
-        // the only thing there is to move between, so it gets the key.
-        //
-        // Except while an address is being typed. Then the list under the field
-        // is what there is to move through, and Return takes whatever the walk
-        // landed on.
+        // Tab is the page's, as in every other browser: it moves between
+        // the things on the page that can take the keyboard. Only while an
+        // address is being typed is it the field's — it walks the list
+        // under the field, or takes the ending the field is offering.
         if event.keyCode == 48, flags.isSubset(of: .shift) {
             if browser.editingTab != nil { return true }
-            // Filling something in on the page: the key belongs to the field,
-            // which may well be offering a completion to take with it.
-            if !browser.fieldShowing, browser.active?.typing == true { return false }
-            if browser.fieldShowing, !browser.offers.isEmpty {
+            guard browser.fieldShowing else { return false }
+            if !browser.offers.isEmpty {
                 browser.walk(flags.contains(.shift) ? -1 : 1)
-                return true
+            } else {
+                browser.acceptEnding()
             }
-            browser.step(flags.contains(.shift) ? -1 : 1)
             return true
         }
 
