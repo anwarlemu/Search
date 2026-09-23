@@ -205,7 +205,7 @@ struct SettingsPanel: View {
         Card {
             ForEach(Array(browser.profileNames.enumerated()), id: \.offset) { index, name in
                 if index > 0 { Rule() }
-                Line(name, index == browser.profile ? "The tabs on screen now" : "⌃\(index + 1)") {
+                Line(name, index == browser.profile ? "The tabs on screen now" : (index < 9 ? browser.keys.chord(for: .profileNumber)?.with(key: "\(index + 1)").label : nil)) {
                     HStack(spacing: 6) {
                         if index != browser.profile {
                             Pill("Switch") { browser.switchProfile(to: index) }
@@ -218,7 +218,7 @@ struct SettingsPanel: View {
                 }
             }
             Rule()
-            Line("New profile", "Another set of tabs — the same sign-ins, history and passwords. ⌃1, ⌃2 … switch between them.") {
+            Line("New profile", "Another set of tabs — the same sign-ins, history and passwords. ⌘1, ⌘2 … switch between them; change the keys under Shortcuts.") {
                 Pill("Add…", filled: true) { browser.newProfile() }
             }
         }

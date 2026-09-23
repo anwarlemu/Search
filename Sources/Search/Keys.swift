@@ -197,7 +197,7 @@ final class Keys: ObservableObject {
             case .pinTab: return "shift+cmd+d"
             case .address: return "cmd+l"
             case .switchTab: return "cmd+k"
-            case .tabNumber: return "cmd+1"
+            case .tabNumber: return "ctrl+1"
             case .nextTab: return "shift+cmd+]"
             case .previousTab: return "shift+cmd+["
             case .recentTab: return "ctrl+tab"
@@ -230,7 +230,7 @@ final class Keys: ObservableObject {
             case .settings: return "cmd+,"
             case .passwords: return "opt+cmd+l"
             case .welcome: return nil
-            case .profileNumber: return "ctrl+1"
+            case .profileNumber: return "cmd+1"
             case .previousProfile: return "opt+cmd+["
             case .nextProfile: return "opt+cmd+]"
             case .newProfile: return nil

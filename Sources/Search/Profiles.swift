@@ -109,7 +109,7 @@ struct ProfileDoor: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Profile   ⌃1 ⌃2 …")
+            .help("Profile   " + ((browser.keys.chord(for: .profileNumber)?.label).map { "\($0) \($0.dropLast())2 …" } ?? ""))
         }
     }
 }
