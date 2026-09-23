@@ -40,6 +40,10 @@ enum Web {
         // Off by default on macOS, which is why a full-screen button on a video
         // did nothing at all: the page asks, and WebKit refuses without a word.
         config.preferences.isElementFullscreenEnabled = true
+        // "Inspect Element" in the page's own menu. isInspectable (below, on
+        // the view) only lets Safari's Develop menu in; the item itself waits
+        // on this older switch, which has no public name.
+        config.preferences.setValue(true, forKey: "developerExtrasEnabled")
         config.mediaTypesRequiringUserActionForPlayback = .audio
         if Store.testing, !Store.measuring { config.preferences.inactiveSchedulingPolicy = .none }
         return config
@@ -352,6 +356,17 @@ final class Tab: ObservableObject, Identifiable {
     }
 
     func magnify(by factor: CGFloat) { magnify(to: web.pageZoom * factor) }
+
+    /// ⌥⌘I. WebKit's inspector, through the one door it has on macOS: an
+    /// accessor with no public name, asked for by name and left alone if
+    /// it isn't there.
+    func inspect() {
+        guard !isBlank, web.responds(to: NSSelectorFromString("_inspector")),
+              let inspector = web.perform(NSSelectorFromString("_inspector"))?.takeUnretainedValue() as? NSObject,
+              inspector.responds(to: NSSelectorFromString("show"))
+        else { return }
+        inspector.perform(NSSelectorFromString("show"))
+    }
 
     /// ⌘0 undoes both kinds of zoom at once — whichever one you reached for.
     func resetZoom() {

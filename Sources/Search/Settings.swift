@@ -362,7 +362,7 @@ struct SettingsPanel: View {
                 Rule()
                 Shortcut("⇧⌘S", "Tabs in a sidebar")
                 Rule()
-                Shortcut("⇧⌘R", "Reading mode")
+                Shortcut("⇧⌘R", "Reload without the cache")
                 Rule()
                 Shortcut("⇧⌘H", "Hide something on this site")
                 Rule()

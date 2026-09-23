@@ -81,6 +81,14 @@ final class Browser: NSObject, ObservableObject {
         withAnimation(Motion.glide) { prefs.sidebar.toggle() }
     }
 
+    /// ⌥⌘S. The tabs put away, or brought back.
+    func toggleBare() {
+        withAnimation(Motion.glide) { prefs.bare.toggle() }
+    }
+
+    /// ⌥⌘I. WebKit's inspector over the page.
+    func inspect() { active?.inspect() }
+
     /// The address field, raised over a page by ⌘L. A blank tab shows it
     /// without being asked — there is nothing else for that tab to show.
     @Published var editing = false
@@ -1567,6 +1575,37 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func reload() { active?.reload() }
+
+    /// ⇧⌘R. The page again from the network, with nothing the cache kept for
+    /// this site standing in — the stylesheet that changed, the script that
+    /// didn't take. Cookies and sign-ins are not cache and stay.
+    func hardReload() {
+        guard let tab = active, !tab.isBlank, let host = tab.address?.host()?.lowercased() else { return }
+        // A tab holding no page has nothing cached to be rid of; waking it
+        // is the reload.
+        guard !tab.asleep else {
+            tab.reload()
+            return
+        }
+        let store = tab.web.configuration.websiteDataStore
+        let types: Set<String> = [
+            WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache,
+            WKWebsiteDataTypeOfflineWebApplicationCache, WKWebsiteDataTypeFetchCache,
+        ]
+        store.fetchDataRecords(ofTypes: types) { records in
+            MainActor.assumeIsolated {
+                // Records are named by site — example.com for every host
+                // under it — which is the right width for a cache.
+                let mine = records.filter { host == $0.displayName || host.hasSuffix("." + $0.displayName) }
+                store.removeData(ofTypes: types, for: mine) {
+                    MainActor.assumeIsolated {
+                        tab.web.reloadFromOrigin()
+                        self.announce("Reloaded without the cache")
+                    }
+                }
+            }
+        }
+    }
     func back() { active?.back() }
     func forward() { active?.forward() }
 }

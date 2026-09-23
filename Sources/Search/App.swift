@@ -57,6 +57,8 @@ struct SearchApp: App {
                     set: { _ in browser.toggleSidebar() }
                 ))
                 .keyboardShortcut("s", modifiers: [.command, .shift])
+                Button(browser.prefs.bare ? "Show Tabs" : "Hide Tabs") { browser.toggleBare() }
+                    .keyboardShortcut("s", modifiers: [.command, .option])
                 Picker("Tabs Wear", selection: Binding(
                     get: { browser.prefs.glyph },
                     set: { browser.prefs.glyph = $0 }
@@ -68,8 +70,10 @@ struct SearchApp: App {
                 Divider()
                 Button("Reload Page") { browser.reload() }
                     .keyboardShortcut("r")
-                Button("Reading Mode") { browser.toggleReader() }
+                Button("Reload Without Cache") { browser.hardReload() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .disabled(browser.active?.isBlank ?? true)
+                Button("Reading Mode") { browser.toggleReader() }
                 Button("Float Video") { browser.toggleFloat() }
                     .keyboardShortcut("p", modifiers: [.command, .shift])
                 Divider()
@@ -84,6 +88,10 @@ struct SearchApp: App {
                     .keyboardShortcut("-")
                 Button("Actual Size") { browser.resetZoom() }
                     .keyboardShortcut("0")
+                Divider()
+                Button("Show Web Inspector") { browser.inspect() }
+                    .keyboardShortcut("i", modifiers: [.command, .option])
+                    .disabled(browser.active?.isBlank ?? true)
             }
             CommandMenu("Tabs") {
                 Button("Back") { browser.back() }
@@ -276,13 +284,14 @@ struct ContentView: View {
                 }
             }
 
-            if !browser.prefs.sidebar, browser.active?.immersed != true {
+            if !browser.prefs.sidebar, !browser.prefs.bare, browser.active?.immersed != true {
                 TabBar(browser: browser)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .ignoresSafeArea()
         .animation(Motion.glide, value: browser.prefs.sidebar)
+        .animation(Motion.glide, value: browser.prefs.bare)
         .animation(.easeOut(duration: 0.12), value: browser.active?.immersed)
     }
 
@@ -548,13 +557,15 @@ struct ContentView: View {
 
     /// True while the tabs are down the left.
     private var sidebar: Bool {
-        browser.prefs.sidebar && browser.active?.immersed != true
+        browser.prefs.sidebar && !browser.prefs.bare && browser.active?.immersed != true
     }
 
     /// The column has its own corner for the lights, so the page beside it
     /// starts at the very top; the strip needs a band.
     private var band: CGFloat {
-        guard browser.active?.immersed != true else { return 0 }
+        // With the tabs put away the page has the top too; the lights sit
+        // over its corner, as they do over a full-screen page.
+        guard browser.active?.immersed != true, !browser.prefs.bare else { return 0 }
         return browser.prefs.sidebar ? 0 : Metrics.strip
     }
 
@@ -693,6 +704,12 @@ struct ContentView: View {
         // is what there is to move through, and Return takes whatever the walk
         // landed on.
         if event.keyCode == 48, !flags.contains(.command), !flags.contains(.option) {
+            // ⌃Tab and ⌃⇧Tab: the next tab and the one before, from wherever
+            // the caret is — the one key every browser gives to the row.
+            if flags.contains(.control) {
+                browser.step(flags.contains(.shift) ? -1 : 1)
+                return true
+            }
             if browser.editingTab != nil { return true }
             // Filling something in on the page: the key belongs to the field,
             // which may well be offering a completion to take with it.
@@ -781,7 +798,7 @@ struct ContentView: View {
         case "r" where !shifted:
             browser.reload()
         case "r" where shifted:
-            browser.toggleReader()
+            browser.hardReload()
         case "[":
             shifted ? browser.step(-1) : browser.back()
         case "]":
