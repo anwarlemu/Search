@@ -296,7 +296,28 @@ struct DragStrip: NSViewRepresentable {
             switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
             case "Minimize": window.miniaturize(nil)
             case "None": break
-            default: window.zoom(nil)
+            // "Fill" and "Maximize" both: zoom asks the content how big it
+            // would like to be, and a SwiftUI window answers with the size
+            // it already is — so zoom(nil) did nothing at all. The whole
+            // usable screen is what a browser window is being asked for.
+            default: Strip.fill(window)
+            }
+        }
+
+        /// The window takes the whole usable screen; a second double-click
+        /// puts it back where it was.
+        private static var unfilled: [ObjectIdentifier: NSRect] = [:]
+        private static func fill(_ window: NSWindow) {
+            guard let screen = window.screen ?? NSScreen.main else { return }
+            let key = ObjectIdentifier(window)
+            let full = screen.visibleFrame
+            let filled = abs(window.frame.width - full.width) < 2 && abs(window.frame.height - full.height) < 2
+            if let back = unfilled[key], filled {
+                unfilled[key] = nil
+                window.setFrame(back, display: true, animate: true)
+            } else {
+                unfilled[key] = window.frame
+                window.setFrame(screen.visibleFrame, display: true, animate: true)
             }
         }
     }
