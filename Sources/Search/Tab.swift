@@ -1014,6 +1014,10 @@ final class PageView: WKWebView {
     private var showing = false
     private var going = false
     private var pulls = 0
+    /// True once this gesture is the disc's: the page has said nothing under
+    /// the fingers scrolls that way, so from here on it isn't shown the
+    /// events at all.
+    private var taking = false
 
     /// How far the fingers travel before letting go means it.
     private static let arm: CGFloat = 110
@@ -1102,12 +1106,23 @@ final class PageView: WKWebView {
 
     override func scrollWheel(with event: NSEvent) {
         onTouch?()
-        // The page gets every event first and scrolls as it always did. The
-        // swipe is only read, never taken.
-        super.scrollWheel(with: event)
-        // Only a live trackpad gesture — not its glide afterwards, and not a
-        // mouse wheel, which has no beginning or end to speak of.
-        guard event.momentumPhase == [] else { return }
+        // The page gets every event first and scrolls as it always did —
+        // until it has said a sideways swipe is nobody's. From then on the
+        // gesture, and the glide after it, are the disc's alone: handed on
+        // as well, they had the whole page rubber-banding sideways under it.
+        // The gesture's end still goes through, so the page finishes
+        // whatever it began on the first few points.
+        let closing = event.phase == .ended || event.phase == .cancelled
+        if event.momentumPhase != [] {
+            // Only a live trackpad gesture is read — not its glide
+            // afterwards, and not a mouse wheel, which has no beginning or
+            // end to speak of.
+            if !taking { super.scrollWheel(with: event) }
+            return
+        }
+        if event.phase == .mayBegin || event.phase == .began { taking = false }
+        if !taking, axis == .across, free == true, !spent { taking = true }
+        if !taking || closing { super.scrollWheel(with: event) }
 
         switch event.phase {
         case .mayBegin, .began:
