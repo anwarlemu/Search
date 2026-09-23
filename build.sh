@@ -66,10 +66,17 @@ if [ "$CONFIG" = "release" ]; then
 fi
 
 # The icon, drawn fresh each time — it is thirty lines of Swift, not an asset
-# to keep in step with anything.
+# to keep in step with anything. SEARCH_ICON picks what goes on the plate:
+# "figure" (the default since 24 September 2026) is Icon/figure.png; "mark"
+# is the S-in-a-pill mark it replaced, still drawn from its own path.
+ICON="${SEARCH_ICON:-figure}"
 ICONSET="build/AppIcon.iconset"
 rm -rf "$ICONSET"
-swift Icon/icon.swift "$ICONSET" > /dev/null
+if [ "$ICON" = figure ]; then
+  swift Icon/icon.swift "$ICONSET" Icon/figure.png > /dev/null
+else
+  swift Icon/icon.swift "$ICONSET" > /dev/null
+fi
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET"
 

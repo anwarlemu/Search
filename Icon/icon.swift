@@ -7,6 +7,9 @@
 import AppKit
 
 let out = URL(fileURLWithPath: CommandLine.arguments.dropFirst().first ?? "AppIcon.iconset")
+/// A picture to put on the plate instead of the mark — Icon/figure.png, when
+/// build.sh is asked for it. Without one, the mark.
+let art = CommandLine.arguments.dropFirst(2).first.flatMap { NSImage(contentsOfFile: $0) }
 try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
 
 /// Drice's Subtract.svg (22 September 2026): a pill with an S cut out of it,
@@ -101,6 +104,18 @@ func draw(_ size: CGFloat) -> NSImage {
     NSColor.white.setFill()
     shape.fill()
     NSGraphicsContext.restoreGraphicsState()
+
+    // A picture, if one was given: the whole of it on the plate, cut to the
+    // plate's corners — what runs off its edge in the picture runs off the
+    // plate's edge too.
+    if let art {
+        NSGraphicsContext.saveGraphicsState()
+        shape.addClip()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        art.draw(in: plate, from: .zero, operation: .sourceOver, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+        return image
+    }
 
     // The mark, black on the plate, at the proportion of Drice's search.jpg
     // (22 September 2026): 607 of a 1000-wide canvas, which on a plate that
