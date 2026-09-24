@@ -259,6 +259,7 @@ final class Tab: ObservableObject, Identifiable {
     private let images = ImageRelay()
     private let shop = StoreRelay()
     private let bell = NotifyRelay()
+    private let links = LinkRelay()
     private let ears = AudioWatch()
     private var lastY: Double = 0
 
@@ -357,7 +358,9 @@ final class Tab: ObservableObject, Identifiable {
         controller.removeScriptMessageHandler(forName: ImageRelay.name)
         controller.removeScriptMessageHandler(forName: StoreRelay.name)
         controller.removeScriptMessageHandler(forName: NotifyRelay.name)
+        controller.removeScriptMessageHandler(forName: LinkRelay.name)
         controller.add(bell, name: NotifyRelay.name)
+        controller.add(links, name: LinkRelay.name)
         controller.add(relay, name: ScrollRelay.name)
         controller.add(veils_, name: VeilRelay.name)
         controller.add(images, name: ImageRelay.name)
@@ -405,6 +408,7 @@ final class Tab: ObservableObject, Identifiable {
         images.tab = self
         shop.tab = self
         bell.tab = self
+        links.tab = self
         ears.watch(web) { [weak self] on in self?.noisy = on }
         return web
     }
@@ -478,6 +482,9 @@ final class Tab: ObservableObject, Identifiable {
         )
         controller.addUserScript(
             WKUserScript(source: StoreRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        )
+        controller.addUserScript(
+            WKUserScript(source: LinkRelay.script, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         )
         controller.addUserScript(
             WKUserScript(source: Notify.script(permission: Notify.permission(for: site)), injectionTime: .atDocumentStart, forMainFrameOnly: false)
@@ -959,6 +966,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.removeScriptMessageHandler(forName: ImageRelay.name)
         controller.removeScriptMessageHandler(forName: StoreRelay.name)
         controller.removeScriptMessageHandler(forName: NotifyRelay.name)
+        controller.removeScriptMessageHandler(forName: LinkRelay.name)
         controller.removeAllUserScripts()
         web.onPull = nil
         web.onTouch = nil
@@ -1418,4 +1426,46 @@ final class ScrollRelay: NSObject, WKScriptMessageHandler {
     """
 }
 
+/// Where the link under the pointer goes, for the line in the corner.
+///
+/// WebKit's own hit-testing callback never arrived in the shipped app, so
+/// the page says so itself: one listener for the pointer entering and
+/// leaving links, which speaks only when the address changes.
+final class LinkRelay: NSObject, WKScriptMessageHandler {
+    static let name = "officeLink"
+
+    weak var tab: Tab?
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        let href = message.body as? String
+        MainActor.assumeIsolated {
+            guard let tab else { return }
+            let link = (href?.isEmpty ?? true) ? nil : href
+            if tab.hovered != link { tab.hovered = link }
+        }
+    }
+
+    static let script = """
+    (function () {
+      var H = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.\(name);
+      if (!H) return;
+      var said = '';
+      function say(href) { if (href === said) return; said = href; H.postMessage(href); }
+      function link(node) {
+        for (var n = node; n && n !== document; n = n.parentNode || n.host) {
+          if (n.nodeType === 1 && (n.tagName === 'A' || n.tagName === 'AREA') && n.href) return n;
+        }
+        return null;
+      }
+      document.addEventListener('mouseover', function (e) {
+        var a = link(e.composedPath ? e.composedPath()[0] : e.target);
+        say(a ? String(a.href) : '');
+      }, { capture: true, passive: true });
+      document.addEventListener('mouseout', function (e) {
+        if (!e.relatedTarget || !link(e.relatedTarget)) say('');
+      }, { capture: true, passive: true });
+      window.addEventListener('pagehide', function () { say(''); });
+    })();
+    """
+}
 

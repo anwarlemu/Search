@@ -2036,16 +2036,6 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         close(tab)
     }
 
-    /// What is under the pointer, from WebKit itself — no script in the
-    /// page. The link's address goes on the tab, for the line in the
-    /// bottom corner that says where a click would go.
-    @objc(_webView:mouseDidMoveOverElement:withFlags:userInfo:)
-    func webView(_ webView: WKWebView, mouseDidMoveOverElement result: NSObject?, withFlags flags: UInt, userInfo: Any?) {
-        guard let tab = tab(for: webView) else { return }
-        let link = (result?.value(forKey: "absoluteLinkURL") as? URL)?.absoluteString
-        if tab.hovered != link { tab.hovered = link }
-    }
-
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         tab(for: webView)?.hovered = nil
         guard let tab = tab(for: webView) else { return }
