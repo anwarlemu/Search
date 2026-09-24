@@ -326,6 +326,7 @@ final class Tab: ObservableObject, Identifiable {
     }
 
     private func build() -> PageView {
+        ViewBridgeGuard.install()
         let config = configuration ?? Web.configuration(shy: shy)
         configuration = config
         Web.unlockFrameRate(config.preferences)
