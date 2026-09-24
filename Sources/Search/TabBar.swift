@@ -411,6 +411,7 @@ private struct TabPill: View {
             }
         }
         .background { ground }
+        .overlay { if chosen { Outline(radius: 9) } }
         .modifier(Shake(travel: shake))
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         // Never both at once.
@@ -425,6 +426,8 @@ private struct TabPill: View {
         // and edits its letter; everything else answers the first click at
         // once. Change Letter in the menu covers the rest.
         .modifier(OneClick(double: live && pinned) {
+            // With ⌘ or ⇧ held the click picks the tab out; see Selection.swift.
+            if browser.choose(tab) { return }
             if live && pinned {
                 browser.editLetter(tab)
             } else if live && !pinned {
@@ -433,6 +436,9 @@ private struct TabPill: View {
                 browser.select(tab)
             }
         })
+        // A tap with ⇧ down never reaches the gesture above on macOS — SwiftUI
+        // keeps ⇧-clicks for its own lists — so the run is asked for here.
+        .simultaneousGesture(TapGesture().modifiers(.shift).onEnded { _ = browser.choose(tab, with: .shift) })
         .onHover { hovering = $0 }
         .contextMenu { TabMenu(browser: browser, tab: tab, close: close) }
         .help(pinned || compact ? tab.label : "")
@@ -541,6 +547,9 @@ private struct TabPill: View {
         .frame(width: span, alignment: .leading)
     }
 
+    /// Picked out with ⌘ or ⇧, to be moved or closed with the others.
+    private var chosen: Bool { browser.chosen.contains(tab.id) }
+
     @ViewBuilder
     private var ground: some View {
         if live {
@@ -562,7 +571,7 @@ private struct TabPill: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             .matchedGeometryEffect(id: "live", in: pill)
-        } else if hovering {
+        } else if hovering || chosen {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(Palette.hover)
         } else if pinned {
@@ -664,13 +673,28 @@ struct TabAddressField: NSViewRepresentable {
     }
 }
 
-/// What a right-click on any tab offers, wherever the tab is drawn.
+/// What a right-click on any tab offers, wherever the tab is drawn. On one
+/// of several picked out, first what can be done with all of them.
 struct TabMenu: View {
     @ObservedObject var browser: Browser
     @ObservedObject var tab: Tab
     let close: () -> Void
 
     var body: some View {
+        if browser.chosen.count > 1, browser.chosen.contains(tab.id) {
+            let count = browser.chosen.count
+            Menu("Move \(count) Tabs to") {
+                ForEach(Array(browser.profileNames.enumerated()), id: \.offset) { index, name in
+                    if index != browser.profile {
+                        Button(name) { browser.moveChosen(toProfile: index) }
+                    }
+                }
+                if browser.profileNames.count > 1 { Divider() }
+                Button("New Profile…") { browser.moveChosenToNewProfile() }
+            }
+            Button("Close \(count) Tabs") { browser.closeChosen() }
+            Divider()
+        }
         if tab.pin == nil {
             Button("Pin") { browser.pin(tab) }
                 .disabled(tab.isBlank)
@@ -693,6 +717,16 @@ struct TabMenu: View {
         Button("Close Tab", action: close)
         Button("Close Other Tabs") { browser.closeOthers(but: tab) }
             .disabled(browser.tabs.count < 2)
+    }
+}
+
+/// The ring round a tab picked out with ⌘ or ⇧ — see Selection.swift.
+struct Outline: View {
+    let radius: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .strokeBorder(Palette.ink.opacity(0.45), lineWidth: 1.5)
     }
 }
 

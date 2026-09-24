@@ -37,6 +37,21 @@ final class Bench {
 
     /// The key code of a letter on a US keyboard, which is what WebKit reads
     /// alongside the characters; anything else goes as the space bar's.
+    /// "cmd,shift,ctrl,opt", as a script writes them, to the flags an event carries.
+    static func flags(_ names: String?) -> NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+        for name in (names ?? "").split(separator: ",") {
+            switch name {
+            case "cmd": flags.insert(.command)
+            case "shift": flags.insert(.shift)
+            case "ctrl": flags.insert(.control)
+            case "opt": flags.insert(.option)
+            default: break
+            }
+        }
+        return flags
+    }
+
     static func keyCode(for character: Character) -> UInt16 {
         let codes: [Character: UInt16] = [
             "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
@@ -357,6 +372,7 @@ final class Bench {
                 "peeking": browser.peeking,
                 "profiles": browser.profileNames,
                 "profile": browser.profile,
+                "chosen": browser.chosenTabs.map(Bench.short),
                 "modal": NSApp.modalWindow.map { "\(type(of: $0)) “\($0.title)”" } ?? "",
                 "look": browser.prefs.look.rawValue,
                 "appearance": NSApp.appearance?.name.rawValue ?? "system",
@@ -437,16 +453,7 @@ final class Bench {
                 }
                 return
             }
-            var flags: NSEvent.ModifierFlags = []
-            for name in (request["mods"] as? String ?? "").split(separator: ",") {
-                switch name {
-                case "cmd": flags.insert(.command)
-                case "shift": flags.insert(.shift)
-                case "ctrl": flags.insert(.control)
-                case "opt": flags.insert(.option)
-                default: break
-                }
-            }
+            let flags = Bench.flags(request["mods"] as? String)
             let special: [String: (UInt16, String)] = ["tab": (48, "\t"), "esc": (53, "\u{1B}"), "return": (36, "\r")]
             let (code, chars) = special[key] ?? (Bench.keyCode(for: first), key)
             window.makeKeyAndOrderFront(nil)
@@ -484,9 +491,10 @@ final class Bench {
                   let first = path.first, first.count == 2
             else { answer(["error": "mouse needs a path of [x, y] points"]); return }
             let clicks = max(1, request["clicks"] as? Int ?? 1)
+            let flags = Bench.flags(request["mods"] as? String)
             func post(_ type: NSEvent.EventType, _ p: [Double], count: Int) {
                 guard let event = NSEvent.mouseEvent(
-                    with: type, location: NSPoint(x: p[0], y: window.frame.height - p[1]), modifierFlags: [],
+                    with: type, location: NSPoint(x: p[0], y: window.frame.height - p[1]), modifierFlags: flags,
                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                     context: nil, eventNumber: 0, clickCount: count, pressure: 1
                 ) else { return }
@@ -594,6 +602,8 @@ final class Bench {
             if let name = request["record"] as? String, let command = Keys.Command(rawValue: name) { browser.keys.recording = .command(command) }
             if let name = request["newProfile"] as? String { browser.addProfile(named: name) }
             if let index = request["deleteProfile"] as? Int { browser.deleteProfile(index) }
+            if let index = request["moveChosen"] as? Int { browser.moveChosen(toProfile: index) }
+            if request["closeChosen"] as? Bool == true { browser.closeChosen() }
             if #available(macOS 15.4, *), let on = request["extensions"] as? Bool { Extensions.shared.menuOpen = on }
             answer(["ok": true])
 

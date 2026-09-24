@@ -12,6 +12,7 @@
     ./bench press KEY [MODS] [--hold]  a shortcut through the app's event queue, MODS like cmd,shift; --hold keeps
                                        the modifiers down until `press release` — --test runs only
     ./bench mouse CLICKS X,Y [X,Y …]   press, drag along the points and release, from the window's top-left — --test runs only
+                                       a last +cmd,shift holds those keys through it
     ./bench text ID                    the page's text
     ./bench eval ID JS                 run JavaScript, print what it returns
     ./bench click ID SELECTOR
@@ -115,7 +116,7 @@ def main(argv):
         if len(args) != 2: sys.exit("usage: bench ui KEY VALUE")
         key, value = args
         if key in ("look", "newProfile", "record"): request[key] = value
-        elif key in ("profile", "deleteProfile"): request[key] = int(value)
+        elif key in ("profile", "deleteProfile", "moveChosen"): request[key] = int(value)
         else: request[key] = value in ("on", "true", "1", "yes")
     elif verb in ("ext-add", "ext-press", "ext-remove", "ext-reload"):
         if len(args) != 1: sys.exit(f"usage: bench {verb} ID")
@@ -165,8 +166,9 @@ def main(argv):
         if len(args) != 1: sys.exit("usage: bench hit X,Y")
         request["path"] = [[float(n) for n in args[0].split(",")]]
     elif verb == "mouse":
-        if len(args) < 2: sys.exit("usage: bench mouse CLICKS X,Y [X,Y …]")
+        if len(args) < 2: sys.exit("usage: bench mouse CLICKS X,Y [X,Y …] [+cmd,shift]")
         request["clicks"] = int(args[0])
+        if args[-1].startswith("+"): request["mods"] = args.pop()[1:]
         request["path"] = [[float(n) for n in a.split(",")] for a in args[1:]]
     elif verb == "resize":
         if len(args) not in (2, 3): sys.exit("usage: bench resize WIDTH HEIGHT [STEPS]")

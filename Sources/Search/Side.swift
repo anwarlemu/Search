@@ -404,10 +404,15 @@ private struct PinSquare: View {
                     .fill(hovering ? Palette.hover : Palette.wash.opacity(0.55))
             }
         }
+        .overlay { if browser.chosen.contains(tab.id) { Outline(radius: scale * 10 / 42) } }
         .contentShape(RoundedRectangle(cornerRadius: scale * 10 / 42, style: .continuous))
         .modifier(OneClick(double: live) {
+            if browser.choose(tab) { return }
             if live { browser.editLetter(tab) } else { browser.select(tab) }
         })
+        // A tap with ⇧ down never reaches the gesture above on macOS — SwiftUI
+        // keeps ⇧-clicks for its own lists — so the run is asked for here.
+        .simultaneousGesture(TapGesture().modifiers(.shift).onEnded { _ = browser.choose(tab, with: .shift) })
         .onHover { hovering = $0 }
         .contextMenu { TabMenu(browser: browser, tab: tab, close: { browser.close(tab) }) }
         .help(tab.label)
@@ -495,11 +500,17 @@ private struct SideRow: View {
         .frame(height: SideBar.row)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background { ground }
+        .overlay { if chosen { Outline(radius: 9) } }
         .modifier(Shake(travel: shake))
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .modifier(OneClick(double: false) {
+            // With ⌘ or ⇧ held the click picks the tab out; see Selection.swift.
+            if browser.choose(tab) { return }
             if live { browser.beginTabEdit(tab) } else { browser.select(tab) }
         })
+        // A tap with ⇧ down never reaches the gesture above on macOS — SwiftUI
+        // keeps ⇧-clicks for its own lists — so the run is asked for here.
+        .simultaneousGesture(TapGesture().modifiers(.shift).onEnded { _ = browser.choose(tab, with: .shift) })
         .onHover { hovering = $0 }
         .contextMenu { TabMenu(browser: browser, tab: tab, close: close) }
         .animation(Motion.quick, value: hovering)
@@ -526,11 +537,14 @@ private struct SideRow: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             .matchedGeometryEffect(id: "live", in: pill)
-        } else if hovering {
+        } else if hovering || chosen {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(Palette.hover)
         }
     }
+
+    /// Picked out with ⌘ or ⇧, to be moved or closed with the others.
+    private var chosen: Bool { browser.chosen.contains(tab.id) }
 
     private var colour: Color {
         if live { return Palette.ink }

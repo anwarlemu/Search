@@ -31,7 +31,7 @@ struct SearchApp: App {
                 Button("Open Address…") { browser.edit() }
                     .keyboardShortcut(browser.keys.menu(.address))
                 Divider()
-                Button("Close Tab") { if let tab = browser.active { browser.close(tab) } }
+                Button("Close Tab") { browser.closeCommand() }
                     .keyboardShortcut(browser.keys.menu(.closeTab))
             }
             CommandGroup(replacing: .printItem) {
@@ -741,6 +741,10 @@ struct ContentView: View {
         if event.keyCode == 53 {
             if browser.editingTab != nil {
                 browser.cancelTabEdit()
+                return true
+            }
+            if !browser.chosen.isEmpty {
+                browser.unchoose()
                 return true
             }
             if browser.tuning {

@@ -19,7 +19,7 @@ It was built by a design studio that spends its whole day in a browser and was t
 ## What it does
 
 - **One field.** Type an address and you go there; type words and you search. It finishes addresses from your own history and never sends what you type anywhere until you press Return.
-- **Tabs that stay out of the way.** Pin the pages you keep open all day and they shrink to a letter or their icon. Tabs from your last session come back instantly and cost nothing until you click them. `⌘K` lists your open tabs by name.
+- **Tabs that stay out of the way.** Pin the pages you keep open all day and they shrink to a letter or their icon. Tabs from your last session come back instantly and cost nothing until you click them. `⌘K` lists your open tabs by name. `⌘`-click and `⇧`-click pick out several tabs at once; right-click any of them to move the lot to another profile, or close them together.
 - **Profiles.** Another set of tabs — work, a project, a client — with the same sign-ins, history and passwords in every one. Tabs › New Profile; `⌘1`–`⌘9` switch, `⌥⌘[` and `⌥⌘]` step. A profile you are not looking at holds no pages and costs nothing.
 - **Reading mode.** View › Reading Mode strips a page down to the article.
 - **Hide anything, for good.** `⇧⌘H`, then click a cookie banner, a newsletter overlay, a rail of "related" nonsense — it goes, and it is still gone on that site next time, before the page has drawn a single frame.

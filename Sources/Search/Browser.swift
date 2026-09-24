@@ -85,6 +85,44 @@ final class Browser: NSObject, ObservableObject {
     }
     private var parked: [Int: Parked] = [:]
 
+    /// Tabs picked out with ⌘-click and ⇧-click, to be moved to another
+    /// profile or closed together — see Selection.swift. Empty when nothing
+    /// is picked; never one tab alone, which is no choice at all.
+    @Published var chosen: Set<Tab.ID> = []
+    /// Where the next ⇧-click measures its run from.
+    var choiceAnchor: Tab.ID?
+
+    /// Tabs to another profile, parked there asleep — the row closes over
+    /// the gap. Landing on a neighbour first, through select(), so the page
+    /// being left is put down the way it always is.
+    func move(_ list: [Tab], toProfile index: Int) {
+        guard index != profile, profileNames.indices.contains(index) else { return }
+        let ids = Set(list.map(\.id))
+        let going = tabs.filter { ids.contains($0.id) }
+        guard !going.isEmpty else { return }
+        if let id = floating, ids.contains(id) { land() }
+        if let active, ids.contains(active.id) {
+            let staying = tabs.enumerated().filter { !ids.contains($0.element.id) }
+            let last = tabs.lastIndex { ids.contains($0.id) } ?? 0
+            if let next = staying.first(where: { $0.offset > last })?.element ?? staying.last?.element {
+                select(next)
+            } else {
+                let fresh = Tab()
+                prepare(fresh)
+                tabs.append(fresh)
+                select(fresh)
+            }
+        }
+        tabs.removeAll { ids.contains($0.id) }
+        var park = parked[index] ?? Parked(tabs: [], active: nil)
+        park.tabs.append(contentsOf: going)
+        if park.active == nil { park.active = going.first?.id }
+        parked[index] = park
+        for tab in going { sleep(tab, parking: true) }
+        writeSession(now: true)
+        announce(going.count == 1 ? "One tab to \(profileNames[index])" : "\(going.count) tabs to \(profileNames[index])")
+    }
+
     /// How many pages a profile holds — not blank tabs, not the bench's.
     func tabCount(in index: Int) -> Int {
         (index == profile ? tabs : parked[index]?.tabs ?? []).filter { !$0.isBlank && !$0.bench }.count
@@ -126,6 +164,7 @@ final class Browser: NSObject, ObservableObject {
         suggesting = nil
         editing = false
         typed = ""
+        unchoose()
         let leaving = tabs
         parked[profile] = Parked(tabs: leaving, active: activeID)
         let coming = parked.removeValue(forKey: index)
@@ -154,8 +193,13 @@ final class Browser: NSObject, ObservableObject {
 
     /// A new one, empty, and straight into it.
     func addProfile(named name: String) {
+        switchProfile(to: makeProfile(named: name))
+    }
+
+    /// A new one, empty, at the end — and its index, for what fills it.
+    func makeProfile(named name: String) -> Int {
         profileNames.append(name)
-        switchProfile(to: profileNames.count - 1)
+        return profileNames.count - 1
     }
 
     func renameProfile(_ index: Int, to name: String) {
@@ -1115,6 +1159,7 @@ final class Browser: NSObject, ObservableObject {
         cancelTabEdit()
         summoning = false
         suggesting = nil
+        unchoose()
         guard tab.id != activeID else { return }
         // Coming back to the tab whose video is out brings it home first, so
         // it is never lifted and landed in the same breath.
@@ -1186,6 +1231,7 @@ final class Browser: NSObject, ObservableObject {
         remember(tab, at: index)
         tab.close()
         tabs.remove(at: index)
+        chosen.remove(tab.id)
         if activeID == tab.id {
             // The neighbour on the right, or the last one if there is no
             // right — through select(), same as everywhere else you land on
