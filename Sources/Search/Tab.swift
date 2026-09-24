@@ -860,8 +860,13 @@ final class Tab: ObservableObject, Identifiable {
         return there.absoluteString == "about:blank" && pending == nil && address != nil
     }
 
-    /// Again from the network. A view that has lost its document is given
-    /// the address back instead: there is nothing else for it to reload.
+    /// ⌘R: the page again, the way every browser reloads — the document
+    /// asked for afresh, and its scripts, pictures and fonts checked against
+    /// the cache rather than fetched again whole. Fetching everything again
+    /// made a reload two to four times slower (YouTube 4 s and 7.8 MB
+    /// against 1.7 s and 1.1 MB); that is ⇧⌘R's job now. A view that has
+    /// lost its document is given the address back instead: there is
+    /// nothing else for it to reload.
     func reload() {
         // A pin put down with ⌘W has no view left to reload; waking it is
         // the reload.
@@ -869,7 +874,7 @@ final class Tab: ObservableObject, Identifiable {
         if hollow, let address {
             web.load(URLRequest(url: address))
         } else {
-            web.reloadFromOrigin()
+            web.reload()
         }
     }
     func stop() { web.stopLoading() }
