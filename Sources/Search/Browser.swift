@@ -661,7 +661,7 @@ final class Browser: NSObject, ObservableObject {
 
     /// The last few places, for the History menu.
     var recentlyVisited: [History.Trace] {
-        Array(history.everything().prefix(8))
+        history.recent(8)
     }
 
     // MARK: - the camera and the microphone
@@ -981,8 +981,11 @@ final class Browser: NSObject, ObservableObject {
         }
         let here = min(max(0, spaces[profile].active), tabs.count - 1)
         activeID = tabs[here].id
-        // Only the one you were looking at actually loads.
-        tabs[here].wake()
+        // Only the one you were looking at actually loads — a turn of the
+        // run loop later, so the window is drawn first. Building its web view
+        // here held the first frame back by some forty milliseconds.
+        let first = tabs[here]
+        DispatchQueue.main.async { first.wake() }
     }
 
     /// The few settings that something else has to be told about. The rest are
@@ -2033,7 +2036,18 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         close(tab)
     }
 
+    /// What is under the pointer, from WebKit itself — no script in the
+    /// page. The link's address goes on the tab, for the line in the
+    /// bottom corner that says where a click would go.
+    @objc(_webView:mouseDidMoveOverElement:withFlags:userInfo:)
+    func webView(_ webView: WKWebView, mouseDidMoveOverElement result: NSObject?, withFlags flags: UInt, userInfo: Any?) {
+        guard let tab = tab(for: webView) else { return }
+        let link = (result?.value(forKey: "absoluteLinkURL") as? URL)?.absoluteString
+        if tab.hovered != link { tab.hovered = link }
+    }
+
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        tab(for: webView)?.hovered = nil
         guard let tab = tab(for: webView) else { return }
         watchStart(tab)
     }

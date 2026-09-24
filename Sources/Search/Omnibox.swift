@@ -12,7 +12,6 @@ struct Omnibox: View {
 
     @State private var shake: CGFloat = 0
     @State private var refused = false
-    @State private var breathing = false
 
     var body: some View {
         ZStack {
@@ -45,15 +44,13 @@ struct Omnibox: View {
             .padding(.vertical, 14)
             .background {
                 ZStack {
-                    // A slow, almost invisible breath under the field. It is
-                    // the only thing on an empty tab, and a thing that never
-                    // moves at all reads as a picture of an app rather than
-                    // an app.
+                    // A soft glow under the field, still. It used to
+                    // breathe, and a blur redrawn every frame was 12–15% of
+                    // a core spent on a tab with nothing in it.
                     RoundedRectangle(cornerRadius: 26, style: .continuous)
                         .fill(Palette.ink.opacity(0.05))
                         .blur(radius: 26)
-                        .scaleEffect(breathing ? 1.03 : 0.97)
-                        .opacity(breathing ? 1 : 0.65)
+                        .opacity(0.85)
 
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .fill(Palette.ground)
@@ -69,11 +66,6 @@ struct Omnibox: View {
             )
             .shadow(color: .black.opacity(0.06), radius: 24, y: 8)
             .modifier(Shake(travel: shake))
-            .onAppear {
-                withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) {
-                    breathing = true
-                }
-            }
             .onChange(of: browser.refusals) { _, _ in
                 shake = 0
                 refused = true

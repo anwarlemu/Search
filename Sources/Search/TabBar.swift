@@ -493,6 +493,17 @@ private struct TabPill: View {
                         .font(.system(size: 9))
                         .foregroundStyle(colour.opacity(0.7))
                 }
+                if tab.noisy || tab.muted {
+                    // Where the sound is coming from, and the way to stop
+                    // hearing it: a click mutes, another unmutes.
+                    Image(systemName: tab.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(tab.muted ? Palette.muted : colour.opacity(0.8))
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                        .onTapGesture { tab.toggleMute() }
+                        .help(tab.muted ? "Unmute tab   ⇧⌘M" : "Mute tab   ⇧⌘M")
+                }
                 Text(tab.label)
                     .font(.system(size: 12.5))
                     .lineLimit(1)
@@ -515,12 +526,6 @@ private struct TabPill: View {
                         .transition(.opacity)
                 } else if tab.loading {
                     Ring().transition(.opacity)
-                } else if tab.noisy {
-                    // Which tab the noise is coming from. ⌘⇧M stops it.
-                    Image(systemName: "speaker.wave.2.fill")
-                        .font(.system(size: 8))
-                        .foregroundStyle(Palette.muted)
-                        .transition(.opacity)
                 }
             }
             .frame(width: editing ? 0 : 15, height: 15)
@@ -540,6 +545,7 @@ private struct TabPill: View {
             .animation(Motion.quick, value: hovering)
             .animation(Motion.quick, value: tab.loading)
             .animation(Motion.quick, value: tab.noisy)
+            .animation(Motion.quick, value: tab.muted)
         }
         .padding(.leading, 11)
         .padding(.trailing, editing ? 11 : 7)
@@ -713,6 +719,8 @@ struct TabMenu: View {
             browser.copyAddress()
         }
         .disabled(tab.isBlank)
+        Button(tab.muted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }
+            .disabled(tab.isBlank)
         Divider()
         Button("Close Tab", action: close)
         Button("Close Other Tabs") { browser.closeOthers(but: tab) }

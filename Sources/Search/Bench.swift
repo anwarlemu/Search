@@ -365,6 +365,7 @@ final class Bench {
                 "downloads": browser.hoarding,
                 "bookmarks": browser.bookmarking,
                 "field": browser.editing,
+                "finding": browser.finding,
                 "suggesting": browser.suggesting != nil,
                 "offering": browser.offering != nil,
                 "asking": browser.asking.map { "\($0.host) \($0.wants)" } ?? "",
@@ -457,6 +458,8 @@ final class Bench {
             let special: [String: (UInt16, String)] = ["tab": (48, "\t"), "esc": (53, "\u{1B}"), "return": (36, "\r")]
             let (code, chars) = special[key] ?? (Bench.keyCode(for: first), key)
             window.makeKeyAndOrderFront(nil)
+            // The keyboard given to the page first, as a click into it would.
+            if request["page"] as? Bool == true, let web = browser.active?.built { window.makeFirstResponder(web) }
             // Addressed to the window: a key equivalent is the window's to
             // hand to the menu, and one with no window reaches no menu.
             for type in [NSEvent.EventType.keyDown, .keyUp] {
@@ -478,6 +481,7 @@ final class Bench {
                     "field": browser.editing,
                     "bare": browser.prefs.bare,
                     "profile": browser.profile,
+                    "responder": window.firstResponder.map { "\(type(of: $0))" } ?? "",
                 ])
             }
 
@@ -490,7 +494,7 @@ final class Bench {
             guard let window = Links.window, let path = request["path"] as? [[Double]],
                   let first = path.first, first.count == 2
             else { answer(["error": "mouse needs a path of [x, y] points"]); return }
-            let clicks = max(1, request["clicks"] as? Int ?? 1)
+            let clicks = max(0, request["clicks"] as? Int ?? 1)
             let flags = Bench.flags(request["mods"] as? String)
             func post(_ type: NSEvent.EventType, _ p: [Double], count: Int) {
                 guard let event = NSEvent.mouseEvent(
@@ -506,13 +510,16 @@ final class Bench {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
                 delay += 0.03
             }
-            for n in 1...clicks {
+            // No clicks: the pointer only moves, along the points.
+            if clicks == 0 { for p in path where p.count == 2 { later { post(.mouseMoved, p, count: 0) } } }
+            for n in stride(from: 1, through: clicks, by: 1) {
                 later { post(.leftMouseDown, first, count: n) }
                 for p in path.dropFirst() where p.count == 2 { later { post(.leftMouseDragged, p, count: n) } }
                 later { post(.leftMouseUp, path.last ?? first, count: n) }
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.6) {
                 answer([
+                    "hovered": browser.active?.hovered ?? "",
                     "frame": [Int(window.frame.minX), Int(window.frame.minY), Int(window.frame.width), Int(window.frame.height)],
                     "tabs": browser.tabs.map { Bench.short($0) },
                     "active": browser.active.map(Bench.short) ?? "",
@@ -538,6 +545,39 @@ final class Bench {
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { answer(["ok": true]) }
             }
+
+        case "newtab":
+            // How long ⌘T takes: the new tab made, the window laid out and
+            // drawn, and the frame handed to the screen — the work, not the
+            // animation that follows it. Only on a SEARCH_PROBE run.
+            guard Store.testing else { answer(["error": "newtab only works on a --test run"]); return }
+            let start = CACurrentMediaTime()
+            browser.newTab()
+            let window = Links.window
+            window?.contentView?.layoutSubtreeIfNeeded()
+            window?.displayIfNeeded()
+            CATransaction.flush()
+            let ms = (CACurrentMediaTime() - start) * 1000
+            answer(["ms": (ms * 10).rounded() / 10, "tabs": browser.tabs.count])
+
+        case "muted":
+            guard let tab = find(request, in: browser), let web = tab.built else { answer(missing(request)); return }
+            if request["toggle"] as? Bool == true { tab.toggleMute() }
+            answer(["muted": tab.muted, "webkit": (web.value(forKey: "_mediaMutedState") as? NSNumber)?.intValue ?? -1])
+
+        case "hover":
+            // The pointer over the middle of a page, through WebKit's own
+            // test hook — for what the page and the link line hear of it.
+            guard Store.testing else { answer(["error": "hover only works on a --test run"]); return }
+            guard let tab = find(request, in: browser), let web = tab.built, let window = web.window else { answer(missing(request)); return }
+            let spot = web.convert(NSPoint(x: web.bounds.midX, y: web.bounds.midY), to: nil)
+            let selector = NSSelectorFromString("_simulateMouseMove:")
+            if web.responds(to: selector), let move = NSEvent.mouseEvent(
+                with: .mouseMoved, location: spot, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0) {
+                web.perform(selector, with: move)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { answer(["hovered": tab.hovered ?? ""]) }
 
         case "hit":
             // Which view a click at a point, from the window's top-left,

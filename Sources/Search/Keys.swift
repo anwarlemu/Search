@@ -163,7 +163,7 @@ final class Keys: ObservableObject {
             case .bookmarks: return "Show bookmarks"
             case .history: return "History"
             case .downloads: return "Downloads"
-            case .muteTab: return "Stop sound in tab"
+            case .muteTab: return "Mute or unmute the tab"
             case .readingMode: return "Reading mode"
             case .floatVideo: return "Float the video"
             case .hideElements: return "Hide something on this site"
@@ -234,6 +234,20 @@ final class Keys: ObservableObject {
             case .previousProfile: return "opt+cmd+["
             case .nextProfile: return "opt+cmd+]"
             case .newProfile: return nil
+            }
+        }
+
+        /// Keys a page may take for itself first — ⌘K in Slack, ⌘F in Docs —
+        /// and that come back to the browser when the page lets them pass.
+        /// Tabs, windows and profiles are always the browser's.
+        var pageFirst: Bool {
+            switch self {
+            case .switchTab, .findOnPage, .findNext, .findPrevious, .print, .copyAddress, .pasteAndGo,
+                 .bookmark, .history, .downloads, .duplicate, .readingMode, .floatVideo, .hideElements,
+                 .hiddenHere, .zoomIn, .zoomOut, .actualSize, .inspector, .back, .forward, .bookmarks, .muteTab:
+                return true
+            default:
+                return false
             }
         }
 

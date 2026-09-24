@@ -67,6 +67,10 @@ final class Float {
         panel.isOpaque = false
         panel.hasShadow = true
         panel.isReleasedWhenClosed = false
+        // A panel hides whenever its app stops being the one in front — the
+        // default, and exactly wrong for a video meant to follow you into
+        // other apps.
+        panel.hidesOnDeactivate = false
         panel.aspectRatio = size
         panel.minSize = NSSize(width: 260, height: 146)
 
@@ -299,24 +303,31 @@ final class Float {
 
         private var grab = NSPoint.zero
         private var origin = NSRect.zero
-        private var stretching = false
+        /// Which edges the press was on — none means the window moves.
+        private var edges: (left: Bool, right: Bool, top: Bool, bottom: Bool) = (false, false, false, false)
+        private static let band: CGFloat = 10
 
-        private func atCorner(_ point: NSPoint) -> Bool {
-            point.x > bounds.maxX - 22 && point.y < bounds.minY + 22
+        private func edges(at point: NSPoint) -> (left: Bool, right: Bool, top: Bool, bottom: Bool) {
+            let b = Controls.band
+            return (point.x < bounds.minX + b, point.x > bounds.maxX - b, point.y > bounds.maxY - b, point.y < bounds.minY + b)
         }
 
         override func resetCursorRects() {
-            addCursorRect(
-                NSRect(x: bounds.maxX - 22, y: bounds.minY, width: 22, height: 22),
-                cursor: .crosshair
-            )
+            let b = Controls.band
+            addCursorRect(NSRect(x: 0, y: b, width: b, height: bounds.height - 2 * b), cursor: .resizeLeftRight)
+            addCursorRect(NSRect(x: bounds.maxX - b, y: b, width: b, height: bounds.height - 2 * b), cursor: .resizeLeftRight)
+            addCursorRect(NSRect(x: b, y: 0, width: bounds.width - 2 * b, height: b), cursor: .resizeUpDown)
+            addCursorRect(NSRect(x: b, y: bounds.maxY - b, width: bounds.width - 2 * b, height: b), cursor: .resizeUpDown)
+            for corner in [NSPoint(x: 0, y: 0), NSPoint(x: bounds.maxX - b, y: 0), NSPoint(x: 0, y: bounds.maxY - b), NSPoint(x: bounds.maxX - b, y: bounds.maxY - b)] {
+                addCursorRect(NSRect(origin: corner, size: NSSize(width: b, height: b)), cursor: .crosshair)
+            }
         }
 
         override func mouseDown(with event: NSEvent) {
             guard let window else { return }
             grab = NSEvent.mouseLocation
             origin = window.frame
-            stretching = atCorner(convert(event.locationInWindow, from: nil))
+            edges = edges(at: convert(event.locationInWindow, from: nil))
         }
 
         override func mouseDragged(with event: NSEvent) {
@@ -325,11 +336,31 @@ final class Float {
             let dx = now.x - grab.x
             let dy = now.y - grab.y
 
-            guard stretching else {
+            guard edges.left || edges.right || edges.top || edges.bottom else {
                 window.setFrameOrigin(NSPoint(x: origin.minX + dx, y: origin.minY + dy))
                 return
             }
-            resize(to: origin.width + dx, from: origin)
+            stretch(dx: dx, dy: dy)
+        }
+
+        /// Any edge or corner sizes the window, keeping the picture's shape;
+        /// the side across from the one held stays where it is.
+        private func stretch(dx: CGFloat, dy: CGFloat) {
+            guard let window, origin.width > 0, origin.height > 0 else { return }
+            let aspect = origin.width / origin.height
+            var byWidth: CGFloat?
+            if edges.right { byWidth = origin.width + dx }
+            if edges.left { byWidth = origin.width - dx }
+            var byHeight: CGFloat?
+            if edges.top { byHeight = (origin.height + dy) * aspect }
+            if edges.bottom { byHeight = (origin.height - dy) * aspect }
+            let asked = [byWidth, byHeight].compactMap { $0 }.max() ?? origin.width
+            let limit = (NSScreen.main?.visibleFrame.width ?? 1600) * 0.85
+            let wide = min(max(window.minSize.width, asked), limit)
+            let tall = wide / aspect
+            let x = edges.left ? origin.maxX - wide : origin.minX
+            let y = edges.bottom ? origin.maxY - tall : (edges.top ? origin.minY : origin.maxY - tall)
+            window.setFrame(NSRect(x: x, y: y, width: wide, height: tall), display: false)
         }
 
         /// Two fingers on the trackpad move the window. There is nothing to

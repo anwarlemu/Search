@@ -38,7 +38,21 @@ private struct Visit: Codable {
 @MainActor
 final class History: ObservableObject {
     private var visits: [String: Visit] = [:] {
-        didSet { objectWillChange.send() }
+        didSet {
+            recentKept = nil
+            objectWillChange.send()
+        }
+    }
+    /// The last few places, for the History menu — which is drawn again with
+    /// every change to the window, and sorting two thousand visits each time
+    /// was work done for a menu nobody had opened.
+    private var recentKept: [Trace]?
+
+    func recent(_ count: Int) -> [Trace] {
+        if let kept = recentKept, kept.count >= count { return Array(kept.prefix(count)) }
+        let list = Array(everything().prefix(max(count, 8)))
+        recentKept = list
+        return Array(list.prefix(count))
     }
     private var saving = false
 

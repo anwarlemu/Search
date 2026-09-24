@@ -12,6 +12,33 @@ import WebKit
 // keeps what it takes to come back exactly where it was.
 
 enum Web {
+    /// Pages draw at the display's own rate — 120 frames a second on a
+    /// ProMotion screen — rather than WebKit's default of holding them near
+    /// 60. Its switch has a name only among WebKit's features, so it is
+    /// found once by that name and set on each page's settings; a WebKit
+    /// without it is left as it is.
+    @MainActor private static let sixtyCap: NSObject? = {
+        let list = (WKPreferences.self as AnyObject)
+            .perform(NSSelectorFromString("_features"))?.takeUnretainedValue() as? [NSObject]
+        return list?.first { ($0.value(forKey: "key") as? String) == "PreferPageRenderingUpdatesNear60FPSEnabled" }
+    }()
+
+    @MainActor static func unlockFrameRate(_ preferences: WKPreferences) {
+        let selector = NSSelectorFromString("_setEnabled:forFeature:")
+        guard let feature = sixtyCap, preferences.responds(to: selector) else { return }
+        typealias Set = @convention(c) (AnyObject, Selector, Bool, AnyObject) -> Void
+        unsafeBitCast(preferences.method(for: selector), to: Set.self)(preferences, selector, false, feature)
+    }
+
+    /// A page's sound off or on. WebKit's own per-page mute, asked for by
+    /// name; a WebKit without it is left playing.
+    @MainActor static func mute(_ web: WKWebView, _ on: Bool) {
+        let selector = NSSelectorFromString("_setPageMuted:")
+        guard web.responds(to: selector) else { return }
+        typealias Set = @convention(c) (AnyObject, Selector, UInt) -> Void
+        unsafeBitCast(web.method(for: selector), to: Set.self)(web, selector, on ? 1 : 0)
+    }
+
     /// Modern WebKit pools processes by data store on its own — every tab
     /// asking for the same one is what gets the second tab a warm process, and
     /// the old WKProcessPool knob does nothing now.
@@ -77,7 +104,10 @@ final class Tab: ObservableObject, Identifiable {
     /// The web view if there is one yet, for the callers that must not be
     /// the reason there is.
     private(set) var built: PageView?
-    private let configuration: WKWebViewConfiguration
+    /// Made when the page is first built, not when the tab is: a session
+    /// of thirty tabs across several profiles came back with thirty of
+    /// these before the window had drawn once.
+    private var configuration: WKWebViewConfiguration?
     /// Whoever handles navigation and windows for this page; applied when
     /// the page is built, whenever that is.
     weak var delegate: (WKNavigationDelegate & WKUIDelegate)? {
@@ -185,6 +215,17 @@ final class Tab: ObservableObject, Identifiable {
     /// True while something on the page is making noise, so the row can say
     /// which tab it is coming from.
     @Published var noisy = false
+    /// Silenced from the row or with ⇧⌘M. Kept when the page sleeps and
+    /// wakes; the page itself plays on, unheard.
+    @Published private(set) var muted = false
+
+    func toggleMute() {
+        muted.toggle()
+        if let built { Web.mute(built, muted) }
+    }
+
+    /// Where the link under the pointer goes, while there is one.
+    @Published var hovered: String?
 
     /// What the page hands back when you point at something and click it.
     var onPick: ((Tab, String, String, String) -> Void)?
@@ -277,11 +318,15 @@ final class Tab: ObservableObject, Identifiable {
     init(shy: Bool = false, bench: Bool = false, configuration: WKWebViewConfiguration? = nil) {
         self.shy = shy
         self.bench = bench
-        self.configuration = configuration ?? Web.configuration(shy: shy)
+        self.configuration = configuration
     }
 
     private func build() -> PageView {
-        let web = PageView(frame: .zero, configuration: configuration)
+        let config = configuration ?? Web.configuration(shy: shy)
+        configuration = config
+        Web.unlockFrameRate(config.preferences)
+        let web = PageView(frame: .zero, configuration: config)
+        if muted { Web.mute(web, true) }
         // The trackpad pinch is WebKit's own: it magnifies what is on screen
         // and lets you move around inside it, the way pinching does everywhere
         // else on a Mac. ⌘+ and ⌘- are the other thing — they lay the page out
@@ -292,6 +337,7 @@ final class Tab: ObservableObject, Identifiable {
         // PageView, and it moves nothing but a disc.
         web.allowsBackForwardNavigationGestures = false
         web.onPull = { [weak self] pull in self?.pull = pull }
+        web.onLeft = { [weak self] in self?.hovered = nil }
         web.onTouch = { [weak self] in self?.uncover() }
         // Pages follow the appearance of the window they are drawn in, and the
         // window follows Settings › Appearance — so a site that honours
@@ -1010,7 +1056,10 @@ final class PageView: WKWebView {
     /// a site that draws its own cursor left a circle stuck at the edge of
     /// the window (agencidev.com, 24 Sep 2026). Once per departure, and
     /// nothing while the pointer is elsewhere.
+    var onLeft: (() -> Void)?
+
     func pointerLeft() {
+        onLeft?()
         guard pointerIn else { return }
         pointerIn = false
         evaluateJavaScript(PageView.leave, completionHandler: nil)
@@ -1342,23 +1391,29 @@ final class ScrollRelay: NSObject, WKScriptMessageHandler {
         MainActor.assumeIsolated { tab?.scrolled(to: y, of: ceiling) }
     }
 
-    /// Reports at most once a frame, and passively, so a page that scrolls
-    /// smoothly without us keeps scrolling smoothly with us.
+    /// Reports passively, and only what the row can show: a change of half
+    /// a percent or more, at most every 80 ms, and the place it came to rest.
+    /// Once a frame meant a message across processes and a redraw of the row
+    /// sixty or a hundred and twenty times a second while scrolling — work
+    /// on the same thread that keeps the scroll smooth.
     static let script = """
     (function () {
-      var waiting = false;
-      function tell() {
+      var sent = -1, last = 0, rest = 0;
+      function tell(force) {
         var root = document.documentElement;
         var y = window.scrollY || root.scrollTop || 0;
         var ceiling = Math.max(1, (root.scrollHeight || 0) - window.innerHeight);
+        var now = Date.now(), at = y / ceiling;
+        if (!force && (Math.abs(at - sent) < 0.005 || now - last < 80)) return;
+        sent = at; last = now;
         window.webkit.messageHandlers.\(name).postMessage({ y: y, max: ceiling });
       }
       window.addEventListener('scroll', function () {
-        if (waiting) return;
-        waiting = true;
-        requestAnimationFrame(function () { waiting = false; tell(); });
+        tell(false);
+        clearTimeout(rest);
+        rest = setTimeout(function () { tell(true); }, 120);
       }, { passive: true });
-      tell();
+      tell(true);
     })();
     """
 }

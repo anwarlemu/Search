@@ -158,7 +158,8 @@ struct SearchApp: App {
                 Button("Close Other Tabs") { if let tab = browser.active { browser.closeOthers(but: tab) } }
                     .keyboardShortcut(browser.keys.menu(.closeOthers))
                     .disabled(browser.tabs.count < 2)
-                Button("Stop Sound in Tab") { browser.pauseMedia() }
+                Button(browser.active?.muted == true ? "Unmute Tab" : "Mute Tab") { browser.active?.toggleMute() }
+                    .disabled(browser.active?.isBlank ?? true)
                     .keyboardShortcut(browser.keys.menu(.muteTab))
             }
             CommandMenu("Bookmarks") {
@@ -263,6 +264,9 @@ private struct MenuLine: View {
 }
 
 struct ContentView: View {
+    /// The press last handed to the page, to know it when WebKit sends it
+    /// back unused.
+    static var offered: NSEvent?
     @ObservedObject var browser: Browser
 
     @State private var keys: Any?
@@ -816,6 +820,22 @@ struct ContentView: View {
             return true
         }
         if let command = browser.keys.command(for: chord) {
+            // The page's first, as in Chrome: ⌘K in Slack, ⌘F in Docs. The
+            // menu can't be left to it — the menu bar is offered a key before
+            // the page is — so the page is handed the press here.
+            if command.pageFirst, pageHasKeyboard, let web = browser.active?.built {
+                if let offered = ContentView.offered, PageView.same(offered, event) {
+                    // Back from the page, unused: the browser's to answer.
+                    ContentView.offered = nil
+                } else {
+                    // To the page first. A page that uses it keeps it; one
+                    // that doesn't has WebKit send the same press back
+                    // through here, and the branch above answers it.
+                    ContentView.offered = event
+                    _ = web.performKeyEquivalent(with: event)
+                    return true
+                }
+            }
             perform(command)
             return true
         }
@@ -841,6 +861,14 @@ struct ContentView: View {
         if chord == Chord(key: "left", command: true) { browser.back(); return true }
         if chord == Chord(key: "right", command: true) { browser.forward(); return true }
         return false
+    }
+
+    /// True while the page on screen has the keyboard.
+    private var pageHasKeyboard: Bool {
+        guard let web = browser.active?.built, !browser.fieldShowing, browser.editingTab == nil,
+              !browser.tuning, !browser.managing, !browser.bookmarking, !browser.recalling, !browser.hoarding
+        else { return false }
+        return web.window?.firstResponder === web
     }
 
     /// One of the app's own commands, by name.
@@ -881,7 +909,10 @@ struct ContentView: View {
         case .bookmarks: browser.bookmarking.toggle()
         case .history: browser.recalling.toggle()
         case .downloads: browser.hoarding.toggle()
-        case .muteTab: browser.pauseMedia()
+        case .muteTab:
+            guard let tab = browser.active, !tab.isBlank else { break }
+            tab.toggleMute()
+            browser.announce(tab.muted ? "Muted" : "Unmuted")
         case .readingMode: browser.toggleReader()
         case .floatVideo: browser.toggleFloat()
         case .hideElements: browser.toggleHiding()
