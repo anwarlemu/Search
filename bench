@@ -158,6 +158,9 @@ def main(argv):
         request["key"] = args[0]
         if len(args) == 2: request["mods"] = args[1]
         if hold: request["hold"] = True
+    elif verb == "leave":
+        if len(args) != 1: sys.exit("usage: bench leave ID")
+        request["id"] = args[0]
     elif verb == "hit":
         if len(args) != 1: sys.exit("usage: bench hit X,Y")
         request["path"] = [[float(n) for n in args[0].split(",")]]

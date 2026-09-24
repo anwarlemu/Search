@@ -983,6 +983,47 @@ final class PageView: WKWebView {
         super.mouseDown(with: event)
     }
 
+    // MARK: - the pointer leaving
+
+    /// True while the pointer is over the page, as far as the page knows.
+    private var pointerIn = false
+
+    override func mouseMoved(with event: NSEvent) {
+        pointerIn = true
+        super.mouseMoved(with: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        pointerLeft()
+    }
+
+    /// Tells the page the pointer has gone, the way Chrome tells it: an out
+    /// and a leave on the document with nothing on the other side. WebKit
+    /// doesn't always — the pointer moving off to another app, or the app
+    /// put behind another, leaves the page believing it is still there, and
+    /// a site that draws its own cursor left a circle stuck at the edge of
+    /// the window (agencidev.com, 24 Sep 2026). Once per departure, and
+    /// nothing while the pointer is elsewhere.
+    func pointerLeft() {
+        guard pointerIn else { return }
+        pointerIn = false
+        evaluateJavaScript(PageView.leave, completionHandler: nil)
+    }
+
+    private static let leave = """
+    (() => {
+      const d = document, root = d.documentElement;
+      if (!root) return;
+      const opts = { bubbles: true, cancelable: false, composed: true, relatedTarget: null, view: window };
+      for (const t of ['pointerout', 'mouseout']) root.dispatchEvent(new (t[0] === 'p' ? PointerEvent : MouseEvent)(t, { ...opts, pointerType: 'mouse' }));
+      for (const target of [root, d]) {
+        target.dispatchEvent(new PointerEvent('pointerleave', { ...opts, bubbles: false, pointerType: 'mouse' }));
+        target.dispatchEvent(new MouseEvent('mouseleave', { ...opts, bubbles: false }));
+      }
+    })()
+    """
+
     // MARK: - keys the page didn't use
 
     /// The last key handed to the page. WebKit sends a key the page didn't

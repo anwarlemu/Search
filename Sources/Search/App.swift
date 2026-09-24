@@ -449,6 +449,8 @@ struct ContentView: View {
             // buttons, and on a light window they come out nearly white. Ours
             // go on in their place until the app comes back.
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+                // Another app in front: the pointer is no longer over the page.
+                browser.active?.built?.pointerLeft()
                 measureLights()
                 resting?.isHidden = false
             }

@@ -1404,8 +1404,10 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// Stepping away from a tab. A video you were watching does not stop
-    /// existing because you went to look something up.
+    /// existing because you went to look something up — and the page is
+    /// told the pointer is no longer over it.
     private func leaving() {
+        active?.built?.pointerLeft()
         lift(active, quietly: true)
     }
 

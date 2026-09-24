@@ -511,6 +511,26 @@ final class Bench {
                 ])
             }
 
+        case "leave":
+            // The pointer over the page, then gone from it the way AppKit
+            // says so — for what the page is told when a hand moves away.
+            guard Store.testing else { answer(["error": "leave only works on a --test run"]); return }
+            guard let tab = find(request, in: browser), let window = tab.web.window else { answer(missing(request)); return }
+            let view = tab.web
+            let inside = view.convert(NSPoint(x: view.bounds.maxX - 3, y: view.bounds.midY), to: nil)
+            if let move = NSEvent.mouseEvent(with: .mouseMoved, location: inside, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                             windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0) {
+                view.mouseMoved(with: move)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                if let exit = NSEvent.enterExitEvent(with: .mouseExited, location: NSPoint(x: inside.x + 20, y: inside.y), modifierFlags: [],
+                                                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                                     context: nil, eventNumber: 0, trackingNumber: 0, userData: nil) {
+                    view.mouseExited(with: exit)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { answer(["ok": true]) }
+            }
+
         case "hit":
             // Which view a click at a point, from the window's top-left,
             // would land on — the chain of views from it up to the window —
