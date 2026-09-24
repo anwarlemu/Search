@@ -1820,31 +1820,19 @@ final class Browser: NSObject, ObservableObject {
     /// this site standing in — the stylesheet that changed, the script that
     /// didn't take. Cookies and sign-ins are not cache and stay.
     func hardReload() {
-        guard let tab = active, !tab.isBlank, let host = tab.address?.host()?.lowercased() else { return }
+        guard let tab = active, !tab.isBlank else { return }
         // A tab holding no page has nothing cached to be rid of; waking it
         // is the reload.
         guard !tab.asleep else {
             tab.reload()
             return
         }
-        let store = tab.web.configuration.websiteDataStore
-        let types: Set<String> = [
-            WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache,
-            WKWebsiteDataTypeOfflineWebApplicationCache, WKWebsiteDataTypeFetchCache,
-        ]
-        store.fetchDataRecords(ofTypes: types) { records in
-            MainActor.assumeIsolated {
-                // Records are named by site — example.com for every host
-                // under it — which is the right width for a cache.
-                let mine = records.filter { host == $0.displayName || host.hasSuffix("." + $0.displayName) }
-                store.removeData(ofTypes: types, for: mine) {
-                    MainActor.assumeIsolated {
-                        tab.web.reloadFromOrigin()
-                        self.announce("Reloaded without the cache")
-                    }
-                }
-            }
-        }
+        // Everything the page uses fetched again, the cache not asked —
+        // Chrome's hard reload. It used to list the whole disk cache and
+        // clear this site's share of it first, which held the reload back
+        // by however long the cache took to read.
+        tab.web.reloadFromOrigin()
+        announce("Reloaded without the cache")
     }
     func back() { active?.back() }
     func forward() { active?.forward() }

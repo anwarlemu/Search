@@ -48,8 +48,21 @@ final class Shield: ObservableObject {
     /// for the whole page rather than for the second half of it.
     func tune(_ controller: WKUserContentController, for host: String?) {
         guard let list else { return }
+        // Changed only when it has to be: off the page and back on again
+        // each navigation had WebKit rebuild the page's blocking rules on
+        // the way to every page, reloads included.
+        let wanted = enabled && !isPaused(on: host)
+        guard wanted != on.contains(ObjectIdentifier(controller)) else { return }
         controller.remove(list)
-        if enabled, !isPaused(on: host) { controller.add(list) }
+        if wanted { controller.add(list) }
+        mark(controller, wanted)
+    }
+
+    /// The controllers the list is on right now.
+    private var on: Set<ObjectIdentifier> = []
+
+    private func mark(_ controller: WKUserContentController, _ added: Bool) {
+        if added { on.insert(ObjectIdentifier(controller)) } else { on.remove(ObjectIdentifier(controller)) }
     }
 
     /// Third parties whose only job is to watch or to sell. First-party
@@ -120,7 +133,7 @@ final class Shield: ObservableObject {
                 }
                 self.list = compiled
                 // Tabs that opened while this was still compiling get it now.
-                if self.enabled { self.waiting.forEach { $0.add(compiled) } }
+                if self.enabled { self.waiting.forEach { $0.add(compiled); self.mark($0, true) } }
                 self.waiting = []
             }
         }
@@ -129,7 +142,11 @@ final class Shield: ObservableObject {
     /// Every tab asks for it; whoever asks before it is ready is remembered.
     func protect(_ controller: WKUserContentController) {
         if let list {
+            // The same controller comes back when a page is built again for
+            // a tab that slept — never added to twice.
+            controller.remove(list)
             if enabled { controller.add(list) }
+            mark(controller, enabled)
         } else {
             waiting.append(controller)
         }
@@ -141,6 +158,7 @@ final class Shield: ObservableObject {
         for controller in controllers {
             controller.remove(list)
             if enabled { controller.add(list) }
+            mark(controller, enabled)
         }
     }
 }

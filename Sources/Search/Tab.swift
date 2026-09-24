@@ -118,6 +118,9 @@ final class Tab: ObservableObject, Identifiable {
     }
     /// The stylesheet a page not yet built is to be armed with.
     private var veils = ""
+    /// What the page's scripts were last armed with, and for which view.
+    private var armed: String?
+    private weak var armedFor: PageView?
 
     @Published private(set) var title = ""
     @Published private(set) var address: URL?
@@ -458,6 +461,13 @@ final class Tab: ObservableObject, Identifiable {
         veils = css
         guard let built else { return }
         let site = host ?? address?.host()?.lowercased()
+        // Only when something they carry has changed. Taking every script
+        // off and putting it back on each navigation — every reload
+        // included — was work for WebKit on the way to every page.
+        let key = "\(css)|\(Notify.permission(for: site))|\(FormRelay.passkeysOffered)"
+        if armedFor === built, armed == key { return }
+        armedFor = built
+        armed = key
         let controller = built.configuration.userContentController
         controller.removeAllUserScripts()
         controller.addUserScript(
