@@ -107,7 +107,7 @@ final class Browser: NSObject, ObservableObject {
             if let next = staying.first(where: { $0.offset > last })?.element ?? staying.last?.element {
                 select(next)
             } else {
-                let fresh = Tab()
+                let fresh = freshTab()
                 prepare(fresh)
                 tabs.append(fresh)
                 select(fresh)
@@ -171,7 +171,7 @@ final class Browser: NSObject, ObservableObject {
         profile = index
         var list = coming?.tabs ?? []
         if list.isEmpty {
-            let tab = Tab()
+            let tab = freshTab()
             prepare(tab)
             list = [tab]
         }
@@ -223,9 +223,9 @@ final class Browser: NSObject, ObservableObject {
 
     /// Everything there is to set. Held here so the whole window redraws when
     /// one of them changes.
-    let prefs = Preferences()
+    let prefs = Browser.sharedPrefs
     /// Every shortcut, and the keys they answer to. See Keys.swift.
-    let keys = Keys()
+    let keys = Browser.sharedKeys
     /// The tucked-away column, out over the page while the pointer is on it.
     @Published var peeking = false
     /// The settings panel.
@@ -235,7 +235,7 @@ final class Browser: NSObject, ObservableObject {
 
     // MARK: - bookmarks
 
-    let bookmarks = Bookmarks()
+    let bookmarks = Browser.sharedBookmarks
     /// The full list, for taking things out.
     @Published var bookmarking = false
     /// The dropdown off the button.
@@ -296,7 +296,7 @@ final class Browser: NSObject, ObservableObject {
     /// answers to this string.
     @Published var typed = "" { didSet { guess() } }
 
-    let history = History()
+    let history = Browser.sharedHistory
     /// What the field is offering, best first.
     @Published private(set) var offers: [Suggestion] = []
     /// The rest of the best match, drawn grey after the caret. Tab takes it.
@@ -371,8 +371,8 @@ final class Browser: NSObject, ObservableObject {
 
     // MARK: - taking things off pages
 
-    let curtain = Curtain()
-    let loot = Loot()
+    let curtain = Browser.sharedCurtain
+    let loot = Browser.sharedLoot
     let floater = Float()
     /// True while the pointer is picking things to hide.
     @Published private(set) var veiling = false
@@ -686,7 +686,9 @@ final class Browser: NSObject, ObservableObject {
     private func answerCapture(_ decision: WKPermissionDecision) {
         guard let decide else { return }
         // Remembered per site, so a call you take every week asks once.
-        Store.settings.set(decision == .grant, forKey: "capture." + askedAbout)
+        // Remembered per site — except in a private window, which remembers
+        // nothing.
+        if !isPrivate { Store.settings.set(decision == .grant, forKey: "capture." + askedAbout) }
         decide(decision)
         self.decide = nil
         askedAbout = ""
@@ -864,8 +866,44 @@ final class Browser: NSObject, ObservableObject {
 
     // MARK: - beginning and ending
 
-    override init() {
+    // MARK: - one browser per window
+
+    /// Settings, shortcuts, bookmarks, history, what is hidden and the list
+    /// of downloads: one of each for every window, so a change in one is a
+    /// change in all and neither saves over the other.
+    private static let sharedPrefs = Preferences()
+    private static let sharedKeys = Keys()
+    private static let sharedBookmarks = Bookmarks()
+    private static let sharedHistory = History()
+    private static let sharedCurtain = Curtain()
+    private static let sharedLoot = Loot()
+
+    /// A private window: its tabs share one store that lives in memory and
+    /// goes with the window — no history, no session, no cache, no cookies
+    /// or sign-ins kept, no icons written, no downloads listed, no
+    /// permissions remembered, and no extensions. See PrivateWindow.
+    let isPrivate: Bool
+    private let privateStore: WKWebsiteDataStore?
+    /// The window this browser draws in, once there is one.
+    weak var window: NSWindow?
+
+    /// A tab for this window: an ordinary one, or one in the private store.
+    func freshTab() -> Tab {
+        isPrivate ? Tab(shy: true, store: privateStore) : Tab()
+    }
+
+    /// Every window's browser, for the bench to find a private window's tabs.
+    static let every = NSHashTable<Browser>.weakObjects()
+
+    init(private isPrivate: Bool = false) {
+        self.isPrivate = isPrivate
+        privateStore = isPrivate ? .nonPersistent() : nil
         super.init()
+        Browser.every.add(self)
+        if isPrivate {
+            beginPrivate()
+            return
+        }
         Shield.shared.enabled = prefs.shielded
         Shield.shared.compile()
         if #available(macOS 15.4, *) { Extensions.shared.start(for: self) }
@@ -988,6 +1026,44 @@ final class Browser: NSObject, ObservableObject {
         DispatchQueue.main.async { first.wake() }
     }
 
+    /// The private window is closing: every page in it goes, and the store
+    /// is emptied now rather than whenever the last reference to it lets go
+    /// — nothing of the window stays in memory after it has gone.
+    func endPrivate() {
+        guard isPrivate else { return }
+        land()
+        dozing?.invalidate()
+        for tab in tabs { tab.close() }
+        tabs = []
+        ghosts = []
+        privateStore?.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {}
+        Browser.every.remove(self)
+    }
+
+    /// A private window starts with one empty tab, and with nothing that
+    /// reaches beyond it: no session read, no extensions, no bench, no
+    /// updater, no taking over the icons that arrive for the main window.
+    private func beginPrivate() {
+        profileNames = ["Private"]
+        welcoming = false
+        history.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
+        bookmarks.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
+        prefs.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
+        keys.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
+        floater.onClose = { [weak self] in self?.land() }
+        floater.onReturn = { [weak self] in
+            guard let self else { return }
+            let came = floating
+            land()
+            if let came, let found = self.tab(came) { reveal(found) }
+            NSApp.activate(ignoringOtherApps: true)
+            window?.makeKeyAndOrderFront(nil)
+        }
+        let tab = freshTab()
+        adopt(tab)
+        watchForSleep()
+    }
+
     /// The few settings that something else has to be told about. The rest are
     /// read where they are used.
     private func follow() {
@@ -1077,6 +1153,8 @@ final class Browser: NSObject, ObservableObject {
     }
 
     private func writeSession(now: Bool = false) {
+        // A private window is in no session: nothing of it comes back.
+        guard !isPrivate else { return }
         let spaces = profileNames.indices.map { index -> Session.Space in
             let list = index == profile ? tabs : (parked[index]?.tabs ?? [])
             let front = index == profile ? activeID : parked[index]?.active
@@ -1133,7 +1211,7 @@ final class Browser: NSObject, ObservableObject {
             focusRequest += 1
             return
         }
-        let tab = Tab()
+        let tab = freshTab()
         adopt(tab)
         leaving()
         activeID = tab.id
@@ -1151,7 +1229,7 @@ final class Browser: NSObject, ObservableObject {
     func replaceBlank(_ tab: Tab, with url: URL) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
         let url = Browser.page(url)
-        let page = Tab(configuration: Browser.extensionConfiguration(for: url))
+        let page = isPrivate ? freshTab() : Tab(configuration: Browser.extensionConfiguration(for: url))
         prepare(page)
         tabs[index] = page
         page.go(to: url)
@@ -1217,10 +1295,10 @@ final class Browser: NSObject, ObservableObject {
                 if let other = profileWithPages() {
                     switchProfile(to: other)
                 } else {
-                    (Links.window ?? NSApp.keyWindow)?.performClose(nil)
+                    (window ?? Links.window ?? NSApp.keyWindow)?.performClose(nil)
                 }
             } else {
-                let fresh = Tab()
+                let fresh = freshTab()
                 remember(tab, at: 0)
                 tab.close()
                 adopt(fresh)
@@ -1286,7 +1364,7 @@ final class Browser: NSObject, ObservableObject {
     /// One of them by name, from the History menu.
     func reopen(_ ghost: Ghost) {
         ghosts.removeAll { $0.id == ghost.id }
-        let tab = Tab()
+        let tab = freshTab()
         prepare(tab)
         leaving()
         tabs.insert(tab, at: min(ghost.index, tabs.count))
@@ -1335,7 +1413,7 @@ final class Browser: NSObject, ObservableObject {
         // An extension's own page is served only to a view built from that
         // extension's configuration.
         let url = Browser.page(url)
-        let tab = Tab(configuration: Browser.extensionConfiguration(for: url))
+        let tab = isPrivate ? freshTab() : Tab(configuration: Browser.extensionConfiguration(for: url))
         prepare(tab)
         let here = atEnd ? nil : tabs.firstIndex { $0.id == activeID }
         tabs.insert(tab, at: here.map { $0 + 1 } ?? tabs.count)
@@ -1405,6 +1483,8 @@ final class Browser: NSObject, ObservableObject {
     /// ⌘⇧N. A tab that keeps nothing — its own cookies, its own sign-ins, no
     /// history, and no place in tomorrow's session.
     func newShyTab() {
+        // In a private window every tab already is one.
+        guard !isPrivate else { return newTab() }
         let tab = Tab(shy: true)
         adopt(tab)
         leaving()
@@ -2173,14 +2253,14 @@ extension Browser: WKDownloadDelegate {
             announce("Download finished")
             return
         }
-        loot.add(
+        if !isPrivate { loot.add(
             Keep(
                 name: file.lastPathComponent,
                 from: download.originalRequest?.url?.host() ?? "",
                 path: file.path,
                 date: Date()
             )
-        )
+        ) }
         announce("Saved \(file.lastPathComponent)")
     }
 

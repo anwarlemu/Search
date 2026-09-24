@@ -46,13 +46,16 @@ enum Web {
     /// — web tabs and extension views alike (see Extensions.init).
     static let userAgentName = "Version/26.5 Safari/605.1.15"
 
-    static func configuration(shy: Bool = false) -> WKWebViewConfiguration {
+    static func configuration(shy: Bool = false, store: WKWebsiteDataStore? = nil) -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
         // The real store, not the ephemeral one: staying signed in between
         // launches is the difference between a browser and a preview pane. A
         // shy tab gets its own store, which exists only while it does — its own
         // cookies, its own sign-ins, and nothing left behind when it closes.
-        config.websiteDataStore = shy ? .nonPersistent() : Store.websites
+        // A private window hands its tabs one store of its own, in memory
+        // only: signed in once there means signed in across that window, and
+        // closing it forgets the lot.
+        config.websiteDataStore = store ?? (shy ? .nonPersistent() : Store.websites)
         // Chrome extensions see every page but a private one. The controller
         // has to be there when the view is made; it can't be added after.
         if #available(macOS 15.4, *), !shy { MainActor.assumeIsolated { Extensions.attach(config) } }
@@ -319,15 +322,19 @@ final class Tab: ObservableObject, Identifiable {
         return "New Tab"
     }
 
-    init(shy: Bool = false, bench: Bool = false, configuration: WKWebViewConfiguration? = nil) {
+    init(shy: Bool = false, bench: Bool = false, configuration: WKWebViewConfiguration? = nil, store: WKWebsiteDataStore? = nil) {
         self.shy = shy
         self.bench = bench
         self.configuration = configuration
+        self.store = store
     }
+
+    /// The private window's store, for a tab that lives in one.
+    private let store: WKWebsiteDataStore?
 
     private func build() -> PageView {
         ViewBridgeGuard.install()
-        let config = configuration ?? Web.configuration(shy: shy)
+        let config = configuration ?? Web.configuration(shy: shy, store: store)
         configuration = config
         Web.unlockFrameRate(config.preferences)
         let web = PageView(frame: .zero, configuration: config)

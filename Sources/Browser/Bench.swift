@@ -248,11 +248,23 @@ final class Bench {
 
         switch verb {
         case "tabs":
-            answer(["tabs": browser.tabs.map(describe)])
+            let others = Browser.every.allObjects.filter { $0 !== browser }.flatMap(\.tabs)
+            answer(["tabs": browser.tabs.map(describe) + others.map { describe($0).merging(["private": true]) { $1 } }])
 
         case "open":
             guard let url = (request["url"] as? String).flatMap(Address.url(from:)) else {
                 answer(["error": "open needs a url"])
+                return
+            }
+            // `private`: in the first private window, as a tab of its own
+            // there — for testing what that window keeps.
+            if request["private"] as? Bool == true {
+                guard let window = Browser.every.allObjects.first(where: \.isPrivate) else {
+                    answer(["error": "no private window open"])
+                    return
+                }
+                let tab = window.open(url, foreground: true)
+                answer(describe(tab))
                 return
             }
             let tab = browser.benchOpen(url)
@@ -639,6 +651,9 @@ final class Bench {
             if let yes = request["allow"] as? Bool { yes ? browser.allowCapture() : browser.denyCapture() }
             if let index = request["profile"] as? Int { browser.switchProfile(to: index) }
             if let on = request["peek"] as? Bool { browser.peeking = on }
+            if request["closePrivate"] as? Bool == true {
+                for other in Browser.every.allObjects where other.isPrivate { other.window?.close() }
+            }
             if let name = request["record"] as? String, let command = Keys.Command(rawValue: name) { browser.keys.recording = .command(command) }
             if let name = request["newProfile"] as? String { browser.addProfile(named: name) }
             if let index = request["deleteProfile"] as? Int { browser.deleteProfile(index) }
@@ -770,7 +785,9 @@ final class Bench {
 
     private func find(_ request: [String: Any], in browser: Browser) -> Tab? {
         guard let ref = (request["id"] as? String)?.lowercased(), !ref.isEmpty else { return nil }
-        return browser.tabs.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
+        // In any window: the main one first, then the private ones.
+        let all = browser.tabs + Browser.every.allObjects.filter { $0 !== browser }.flatMap(\.tabs)
+        return all.first { $0.id.uuidString.lowercased().hasPrefix(ref) }
     }
 
     private func missing(_ request: [String: Any]) -> [String: Any] {

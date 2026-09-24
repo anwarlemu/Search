@@ -136,7 +136,7 @@ final class Keys: ObservableObject {
         var title: String {
             switch self {
             case .newTab: return "New tab"
-            case .newPrivateTab: return "New private tab"
+            case .newPrivateTab: return "New private window"
             case .reopenTab: return "Reopen closed tab"
             case .closeTab: return "Close tab"
             case .closeOthers: return "Close other tabs"

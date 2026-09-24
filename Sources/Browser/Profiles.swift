@@ -79,7 +79,16 @@ struct ProfileDoor: View {
     @ObservedObject var browser: Browser
 
     var body: some View {
-        if browser.profileNames.count > 1 {
+        if browser.isPrivate {
+            // What this window is, said once and quietly.
+            Label("Private", systemImage: "eye.slash")
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(Palette.muted)
+                .padding(.horizontal, 8)
+                .frame(height: 26)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Palette.wash.opacity(0.55)))
+                .help("Nothing in this window is kept: no history, cookies, sign-ins, cache or downloads list")
+        } else if browser.profileNames.count > 1 {
             Menu {
                 ForEach(Array(browser.profileNames.enumerated()), id: \.offset) { index, name in
                     Button { browser.switchProfile(to: index) } label: {

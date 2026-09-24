@@ -50,13 +50,13 @@ On purpose:
 | Extensions | Unpacked in `~/Library/Application Support/Browser/Extensions/`, their data in WebKit's extension store | Each extension, within the permissions you accepted when adding it. |
 | Anything else | Nowhere. There is no server. | — |
 
-A **private tab** (`⇧⌘N`) has its own cookie jar and leaves nothing behind when it closes.
+A **private window** (`⇧⌘N`) keeps nothing: its tabs share one store that lives in memory only — sign in once and you are signed in across that window — and closing it forgets the lot. No history, session, cache, cookies, sign-ins, site icons, downloads list, zoom levels or site permissions are written, extensions don't run in it, and it never offers to save a password. It opens dark so it is never mistaken for the other kind.
 
 ## Keyboard
 
 | | |
 |---|---|
-| `⌘L` address · `⌘K` switch tab · `⌘T` new tab · `⌘W` close · `⇧⌘T` reopen | `⌘[` `⌘]` back, forward · `⇧⌘[` `⇧⌘]` previous, next tab · `⌃1`–`⌃9` jump |
+| `⌘L` address · `⌘K` switch tab · `⌘T` new tab · `⇧⌘N` private window · `⌘W` close · `⇧⌘T` reopen | `⌘[` `⌘]` back, forward · `⇧⌘[` `⇧⌘]` previous, next tab · `⌃1`–`⌃9` jump |
 | `⇧⌘S` tabs across the top or down the left · `⇧⌘B` bookmark this page | `⇧⌘R` reload without the cache · `⇧⌘P` float the video · `⇧⌘H` hide something · `⇧⌘U` what is hidden here |
 | `⌘F` find · `⌘D` duplicate tab · `⇧⌘D` pin or unpin · `⇧⌘C` copy address · `⇧⌘V` paste and go | `⌘Y` history · `⇧⌘J` downloads · `⌘,` settings · `⌥⌘L` passwords |
 

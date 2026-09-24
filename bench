@@ -2,7 +2,7 @@
 """Drive the Browser you already have open, from the shell.
 
     ./bench tabs                       every tab, yours and the bench's
-    ./bench open URL                   a bench tab at the end of the row → its id
+    ./bench open URL [--private]       a bench tab at the end of the row → its id; --private: in the private window
     ./bench go ID URL                  send a bench tab somewhere else
     ./bench wait ID [SECONDS]          until the page has loaded
     ./bench sleep ID                   put a tab to sleep now, or say what keeps it awake
@@ -80,15 +80,17 @@ def main(argv):
     yes = "--yes" in argv
     hold = "--hold" in argv
     page = "--page" in argv
-    argv = [a for a in argv if a not in ("--test", "--yes", "--hold", "--page")]
+    private = "--private" in argv
+    argv = [a for a in argv if a not in ("--test", "--yes", "--hold", "--page", "--private")]
     if not argv or argv[0] in ("-h", "--help", "help"):
         print(__doc__.strip())
         return 0
     verb, args = argv[0], argv[1:]
     request = {"do": verb}
     if verb == "open":
-        if len(args) != 1: sys.exit("usage: bench open URL")
+        if len(args) != 1: sys.exit("usage: bench open URL [--private]")
         request["url"] = args[0]
+        if private: request["private"] = True
     elif verb == "go":
         if len(args) != 2: sys.exit("usage: bench go ID URL")
         request["id"], request["url"] = args
@@ -202,7 +204,7 @@ def main(argv):
         print(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2))
     elif verb == "tabs":
         for tab in answer.get("tabs", []):
-            mark = "⚗" if tab.get("bench") else ("●" if tab.get("active") else " ")
+            mark = "⚗" if tab.get("bench") else ("◌" if tab.get("private") else ("●" if tab.get("active") else " "))
             state = " …" if tab.get("loading") else (" z" if tab.get("asleep") else "")
             print(f"{mark} {tab['id']}  {tab.get('title') or '—'}  {tab.get('url')}{state}")
     else:
