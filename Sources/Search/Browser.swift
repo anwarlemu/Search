@@ -1985,8 +1985,55 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         close(tab)
     }
 
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard let tab = tab(for: webView) else { return }
+        watchStart(tab)
+    }
+
+    /// A page asked for that hasn't started to arrive in ten seconds, on a
+    /// site with a service worker: the worker is the likely reason. A
+    /// worker that stops answering holds every navigation to its site until
+    /// the network gives up a minute later — YouTube and Stripe's dashboard
+    /// both did (24 Sep 2026). That site's workers are cleared and the page
+    /// asked for again; the site registers a fresh one as it loads. Costs a
+    /// timer per navigation, and nothing at all on a page that arrives.
+    private func watchStart(_ tab: Tab) {
+        tab.stuck?.cancel()
+        let work = DispatchWorkItem { [weak self, weak tab] in
+            guard let self, let tab, tab.loading, let web = tab.built,
+                  let url = web.url ?? tab.address, let host = url.host()?.lowercased(),
+                  !tab.rescued.contains(host)
+            else { return }
+            self.rescue(tab, host: host, url: url)
+        }
+        tab.stuck = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: work)
+    }
+
+    /// Clears the site's service workers, if it has any, and asks again.
+    private func rescue(_ tab: Tab, host: String, url: URL) {
+        guard let web = tab.built else { return }
+        let store = web.configuration.websiteDataStore
+        let kind: Set<String> = [WKWebsiteDataTypeServiceWorkerRegistrations]
+        store.fetchDataRecords(ofTypes: kind) { [weak self, weak tab] records in
+            MainActor.assumeIsolated {
+                let mine = records.filter { host == $0.displayName || host.hasSuffix("." + $0.displayName) }
+                guard let self, let tab, !mine.isEmpty, tab.loading else { return }
+                tab.rescued.insert(host)
+                store.removeData(ofTypes: kind, for: mine) {
+                    MainActor.assumeIsolated {
+                        tab.built?.stopLoading()
+                        tab.built?.load(URLRequest(url: url))
+                        self.announce("Reloaded — \(host)'s background worker had stopped answering")
+                    }
+                }
+            }
+        }
+    }
+
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         guard let tab = tab(for: webView) else { return }
+        tab.stuck?.cancel()
         tab.failure = nil
         tab.typing = false
         // Whatever you last set this site to, before it draws a single frame
@@ -2013,6 +2060,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
 
     private func fail(_ webView: WKWebView, _ error: Error) {
         tab(for: webView)?.uncover()
+        tab(for: webView)?.stuck?.cancel()
         let nsError = error as NSError
         let code = nsError.code
         // Cancelled is not a failure: it's what a redirect, a stopped load, or

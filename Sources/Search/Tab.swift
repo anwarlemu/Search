@@ -714,6 +714,13 @@ final class Tab: ObservableObject, Identifiable {
     /// than showing the white that is left.
     var stale = false
 
+    /// The watch on a page that has been asked for and hasn't started to
+    /// arrive. See Browser.watchStart.
+    var stuck: DispatchWorkItem?
+    /// Hosts whose service workers were already cleared for this tab, so a
+    /// site that is simply slow is never cleared twice.
+    var rescued: Set<String> = []
+
     /// The process behind this page just died while it was the one on
     /// screen. `reload()`/`reloadFromOrigin()` lean on state the dead
     /// process was keeping — asking for the address back instead is the
@@ -874,6 +881,7 @@ final class Tab: ObservableObject, Identifiable {
     /// Called when the tab is thrown away. Without it the view keeps running
     /// whatever the page left behind — timers, video, sockets.
     func close() {
+        stuck?.cancel()
         onScroll = nil
         onZoom = nil
         onPick = nil
