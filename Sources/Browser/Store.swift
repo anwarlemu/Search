@@ -15,30 +15,30 @@ enum Store {
     /// once wrote over somebody's real session, and asking a person to
     /// remember a flag is not a safeguard.
     static var testing: Bool {
-        if ProcessInfo.processInfo.environment["SEARCH_PROBE"] != nil { return true }
+        if ProcessInfo.processInfo.environment["BROWSER_PROBE"] != nil { return true }
         return Bundle.main.executablePath?.contains("/.build/") == true
     }
 
-    /// Which test world a test run lives in. SEARCH_PROBE=1, or a run from
-    /// the build folder, is the test world, "Search (test)". SEARCH_PROBE=
-    /// <name> is a world of its own, "Search (<name>)", with settings and
+    /// Which test world a test run lives in. BROWSER_PROBE=1, or a run from
+    /// the build folder, is the test world, "Browser (test)". BROWSER_PROBE=
+    /// <name> is a world of its own, "Browser (<name>)", with settings and
     /// WebKit stores of its own: two sessions testing at once, or a
     /// measurement that needs a browser nobody has installed anything in,
     /// never borrow each other's. Nil for the browser somebody is using.
     static let world: String? = {
         guard testing else { return nil }
-        let asked = (ProcessInfo.processInfo.environment["SEARCH_PROBE"] ?? "").lowercased()
+        let asked = (ProcessInfo.processInfo.environment["BROWSER_PROBE"] ?? "").lowercased()
             .filter { ($0.isASCII && ($0.isLetter || $0.isNumber)) || $0 == "-" }
         return asked.isEmpty || asked == "1" || asked == "test" ? "test" : asked
     }()
 
     /// A test run there to be weighed and timed rather than driven
-    /// (SEARCH_MEASURE beside SEARCH_PROBE). It keeps what the shipped
+    /// (BROWSER_MEASURE beside BROWSER_PROBE). It keeps what the shipped
     /// browser does where test runs otherwise differ — hidden pages slowed
     /// the way WebKit slows them, App Nap left to macOS — so what gets
     /// measured is what people get.
     static var measuring: Bool {
-        testing && ProcessInfo.processInfo.environment["SEARCH_MEASURE"] != nil
+        testing && ProcessInfo.processInfo.environment["BROWSER_MEASURE"] != nil
     }
 
     /// Cookies, sign-ins, caches. WebKit keeps its default store per bundle,
@@ -58,7 +58,7 @@ enum Store {
     /// differ from stores made by identifier in how long extension workers
     /// are let live.
     static var ownContainer: Bool {
-        (Bundle.main.bundleIdentifier ?? "") != "com.officecommun.search"
+        (Bundle.main.bundleIdentifier ?? "") != Store.identity
     }
 
     /// The fixed identifiers of a test world's WebKit stores: 1 for websites,
@@ -83,16 +83,45 @@ enum Store {
     static let folder: URL = {
         let support = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let home = support.appendingPathComponent(world.map { "Search (\($0))" } ?? "Search", isDirectory: true)
+        let home = support.appendingPathComponent(world.map { "Browser (\($0))" } ?? "Browser", isDirectory: true)
         if !testing {
-            let old = support.appendingPathComponent("Office Browser", isDirectory: true)
+            // Everything this browser kept under its earlier names — Search,
+            // and before that Office Browser — moves to this one, once.
             let files = FileManager.default
-            if !files.fileExists(atPath: home.path), files.fileExists(atPath: old.path) {
-                try? files.moveItem(at: old, to: home)
+            for name in ["Search", "Office Browser"] where !files.fileExists(atPath: home.path) {
+                let old = support.appendingPathComponent(name, isDirectory: true)
+                if files.fileExists(atPath: old.path) { try? files.moveItem(at: old, to: home) }
             }
         }
         return home
     }()
+
+    /// Who this browser is to macOS. It was com.officecommun.search, the
+    /// identity of the open-source Search it began as; a browser of its own
+    /// has its own, so the two can sit side by side and share nothing.
+    static let identity = "com.agencidev.browser"
+    private static let formerIdentity = "com.officecommun.search"
+
+    /// Once, at the very start, before WebKit has opened anything: what
+    /// macOS kept for this browser under its former identity — cookies and
+    /// sign-ins, site data, extensions' storage — moves to the new one, so
+    /// nothing is lost and nothing is left for the other app to find.
+    static func moveHouse() {
+        guard !testing else { return }
+        let files = FileManager.default
+        let library = files.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+        for (from, to) in [
+            ("WebKit/\(formerIdentity)", "WebKit/\(identity)"),
+            ("HTTPStorages/\(formerIdentity)", "HTTPStorages/\(identity)"),
+            ("HTTPStorages/\(formerIdentity).binarycookies", "HTTPStorages/\(identity).binarycookies"),
+        ] {
+            let old = library.appendingPathComponent(from), new = library.appendingPathComponent(to)
+            guard files.fileExists(atPath: old.path), !files.fileExists(atPath: new.path) else { continue }
+            try? files.createDirectory(at: new.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? files.moveItem(at: old, to: new)
+        }
+        _ = folder
+    }
 
     static func file(_ name: String) -> URL {
         folder.appendingPathComponent(name)
@@ -119,23 +148,32 @@ enum Store {
             carryOver(into: .standard)
             return .standard
         }
-        let suite = world == "test" ? "com.officecommun.search.test" : "com.officecommun.search.test.\(world ?? "")"
+        let suite = world == "test" ? "\(Store.identity).test" : "\(Store.identity).test.\(world ?? "")"
         return UserDefaults(suiteName: suite) ?? .standard
     }()
 
     /// The old bundle's defaults, read once and written under the new one.
     private static func carryOver(into fresh: UserDefaults) {
-        guard !fresh.bool(forKey: "carried"),
-              let old = UserDefaults(suiteName: "com.driceroland.officebrowser")
-        else { return }
-        for (key, value) in old.dictionaryRepresentation()
-        where fresh.object(forKey: key) == nil && !key.hasPrefix("NS") && !key.hasPrefix("Apple") {
-            fresh.set(value, forKey: key)
+        defer {
+            // Search's own settings go, once they are here, so the app that
+            // still goes by that name starts with nothing of this one's.
+            if fresh.bool(forKey: "carried.browser"), fresh.persistentDomain(forName: formerIdentity) != nil {
+                fresh.removePersistentDomain(forName: formerIdentity)
+            }
         }
-        // The window comes back where it was, under its new name.
-        if let frame = old.string(forKey: "NSWindow Frame office-browser") {
-            fresh.set(frame, forKey: "NSWindow Frame search")
+        guard !fresh.bool(forKey: "carried.browser") else { return }
+        // Search's settings, then Office Browser's for anything still unset.
+        for (suite, frameKey) in [(formerIdentity, "NSWindow Frame search"), ("com.driceroland.officebrowser", "NSWindow Frame office-browser")] {
+            guard let old = UserDefaults(suiteName: suite) else { continue }
+            for (key, value) in old.persistentDomain(forName: suite) ?? [:]
+            where fresh.object(forKey: key) == nil && !key.hasPrefix("NS") && !key.hasPrefix("Apple") {
+                fresh.set(value, forKey: key)
+            }
+            // The window comes back where it was, under its new name.
+            if fresh.string(forKey: "NSWindow Frame browser") == nil, let frame = old.string(forKey: frameKey) {
+                fresh.set(frame, forKey: "NSWindow Frame browser")
+            }
         }
-        fresh.set(true, forKey: "carried")
+        fresh.set(true, forKey: "carried.browser")
     }
 }

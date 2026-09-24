@@ -4,7 +4,7 @@
 # fetches.
 #
 #   ./build.sh                 debug-free release build, ad-hoc signed: runs here
-#   ./build.sh release dmg     + build/Search.dmg, build/Search.zip and
+#   ./build.sh release dmg     + build/Browser.dmg, build/Browser.zip and
 #                                build/appcast.json, signed with Developer ID
 #                                if there is one in the keychain
 #   ./build.sh release ship    + both notarised, the DMG stapled
@@ -21,12 +21,12 @@
 #
 # What "ship" needs, once:
 #   - a Developer ID Application certificate in the login keychain
-#     (SEARCH_SIGN_IDENTITY names it; otherwise the first one found is used)
-#   - a notarytool profile: xcrun notarytool store-credentials "search"
-#     (SEARCH_NOTARY_PROFILE names it; default "search")
-#   - SEARCH_DOWNLOAD_URL, the https folder the three files are served from,
-#     for the appcast. Default https://officecommun.com/search, which is
-#     where Updater.feed in Updater.swift looks.
+#     (BROWSER_SIGN_IDENTITY names it; otherwise the first one found is used)
+#   - a notarytool profile: xcrun notarytool store-credentials "browser"
+#     (BROWSER_NOTARY_PROFILE names it; default "browser")
+#   - BROWSER_DOWNLOAD_URL, the https folder the three files are served from,
+#     for the appcast. No default: Updater asks no feed until BROWSER_FEED
+#     names one.
 #
 # NOTES.md, next to this script, is what's new: newest release first, one
 # paragraph each. The first paragraph goes into the appcast, and from there
@@ -36,8 +36,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 CONFIG="${1:-release}"
 STEP="${2:-app}"
-APP="build/Search.app"
-NAME="Search"
+APP="build/Browser.app"
+NAME="Browser"
 VERSION="$(tr -d '[:space:]' < VERSION)"
 # A build number that only ever goes up, so the updater can tell newer from
 # older without parsing version strings.
@@ -47,7 +47,7 @@ BUILD="$(date +%Y%m%d%H%M)"
 MINIMUM="14.0"
 
 swift build -c "$CONFIG"
-BINARY=".build/$CONFIG/Search"
+BINARY=".build/$CONFIG/Browser"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -58,7 +58,7 @@ cp "$BINARY" "$APP/Contents/MacOS/$NAME"
 # what the app weighed (6.5 MB of binary, 2.7 without them), and nothing the
 # app reads while it runs. They are kept beside the build instead, as a dSYM
 # that turns the addresses in a crash report back into names (Console, or
-# atos -o build/Search.app.dSYM/Contents/Resources/DWARF/Search).
+# atos -o build/Browser.app.dSYM/Contents/Resources/DWARF/Browser).
 if [ "$CONFIG" = "release" ]; then
   rm -rf "$APP.dSYM"
   dsymutil "$BINARY" -o "$APP.dSYM" 2>/dev/null || echo "no dSYM this time" >&2
@@ -66,10 +66,10 @@ if [ "$CONFIG" = "release" ]; then
 fi
 
 # The icon, drawn fresh each time — it is thirty lines of Swift, not an asset
-# to keep in step with anything. SEARCH_ICON picks what goes on the plate:
+# to keep in step with anything. BROWSER_ICON picks what goes on the plate:
 # "figure" (the default since 24 September 2026) is Icon/figure.png; "mark"
 # is the S-in-a-pill mark it replaced, still drawn from its own path.
-ICON="${SEARCH_ICON:-figure}"
+ICON="${BROWSER_ICON:-figure}"
 ICONSET="build/AppIcon.iconset"
 rm -rf "$ICONSET"
 if [ "$ICON" = figure ]; then
@@ -88,14 +88,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>$NAME</string>
   <key>CFBundleDisplayName</key><string>$NAME</string>
   <key>CFBundleExecutable</key><string>$NAME</string>
-  <key>CFBundleIdentifier</key><string>com.officecommun.search</string>
+  <key>CFBundleIdentifier</key><string>com.agencidev.browser</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>$MINIMUM</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
-  <key>NSHumanReadableCopyright</key><string>© Office Commun · Search</string>
+  <key>NSHumanReadableCopyright</key><string>Browser</string>
   <key>NSHighResolutionCapable</key><true/>
   <!-- Owning http and https is what lets macOS offer this app as the default
        browser, and what sends a link clicked in Mail here. -->
@@ -124,9 +124,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
        still wants a sentence to put in its own prompt, and touching the APIs
        without one is a crash rather than a refusal. -->
   <key>NSCameraUsageDescription</key>
-  <string>Websites you visit can ask to use your camera. Search asks you first, every time, for each site.</string>
+  <string>Websites you visit can ask to use your camera. Browser asks you first, every time, for each site.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Websites you visit can ask to use your microphone. Search asks you first, every time, for each site.</string>
+  <string>Websites you visit can ask to use your microphone. Browser asks you first, every time, for each site.</string>
   <key>NSDownloadsFolderUsageDescription</key>
   <string>Files you download are saved to your Downloads folder.</string>
 </dict>
@@ -137,16 +137,16 @@ PLIST
 # runtime Gatekeeper insists on for anything notarised; otherwise ad-hoc,
 # which is enough for the app to run on the machine that built it — and
 # which the updater refuses to swap anything in under.
-IDENTITY="${SEARCH_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
+IDENTITY="${BROWSER_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
   | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"' || true)}"
 # Passkeys need an entitlement Apple grants to browsers on request, and a
 # Developer ID provisioning profile that carries it. With the profile next to
 # this script, both go in; without it, the app is signed as before, because
 # a restricted entitlement with no profile behind it is an app that won't open.
-ENTITLEMENTS="Search.entitlements"
-if [ -f "Search.provisionprofile" ]; then
-  cp "Search.provisionprofile" "$APP/Contents/embedded.provisionprofile"
-  ENTITLEMENTS="Search.passkeys.entitlements"
+ENTITLEMENTS="Browser.entitlements"
+if [ -f "Browser.provisionprofile" ]; then
+  cp "Browser.provisionprofile" "$APP/Contents/embedded.provisionprofile"
+  ENTITLEMENTS="Browser.passkeys.entitlements"
   echo "passkeys: profile embedded"
 fi
 if [ -n "$IDENTITY" ]; then
@@ -206,7 +206,7 @@ echo "packed: $ZIP"
 
 # What the updater reads. The first paragraph of NOTES.md, with the two
 # characters JSON minds escaped, is the line under the version in Settings.
-BASE="${SEARCH_DOWNLOAD_URL:-https://officecommun.com/search}"
+BASE="${BROWSER_DOWNLOAD_URL:-}"
 BASE="${BASE%/}"
 NOTES=""
 if [ -f NOTES.md ]; then
@@ -232,7 +232,7 @@ echo "wrote: build/appcast.json ($VERSION, build $BUILD)"
 # is fetched by an app that already trusts it, and is left as hashed.
 [ -z "$IDENTITY" ] && { echo "can't ship without a Developer ID certificate" >&2; exit 1; }
 for FILE in "$DMG" "$ZIP"; do
-  xcrun notarytool submit "$FILE" --keychain-profile "${SEARCH_NOTARY_PROFILE:-search}" --wait
+  xcrun notarytool submit "$FILE" --keychain-profile "${BROWSER_NOTARY_PROFILE:-browser}" --wait
 done
 xcrun stapler staple "$DMG"
 echo "shipped: $DMG, $ZIP and build/appcast.json — ./publish.sh <folder> puts them on the site"

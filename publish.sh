@@ -2,7 +2,7 @@
 # Puts the three files the site serves into the site: the disk image for
 # people, the ZIP for the updater, and the appcast that names them both.
 #
-#   ./publish.sh "../Office Commun Website/public/search"
+#   ./publish.sh "path/to/site/public/browser"
 #
 # ./build.sh release ship makes them first (release dmg makes them too, but
 # unnotarised — fine for trying, not for anyone else's Mac). The names never
@@ -12,13 +12,13 @@ set -euo pipefail
 cd "$(dirname "$0")"
 [ $# -eq 1 ] || { echo "usage: ./publish.sh <folder>" >&2; exit 1; }
 FOLDER="$1"
-FILES=(Search.dmg Search.zip appcast.json)
+FILES=(Browser.dmg Browser.zip appcast.json)
 
 for FILE in "${FILES[@]}"; do
   [ -f "build/$FILE" ] || { echo "build/$FILE is missing — ./build.sh release dmg makes it" >&2; exit 1; }
 done
-xcrun stapler validate -q "build/Search.dmg" >/dev/null 2>&1 \
-  || echo "note: build/Search.dmg is not notarised — ./build.sh release ship does that" >&2
+xcrun stapler validate -q "build/Browser.dmg" >/dev/null 2>&1 \
+  || echo "note: build/Browser.dmg is not notarised — ./build.sh release ship does that" >&2
 
 mkdir -p "$FOLDER"
 for FILE in "${FILES[@]}"; do

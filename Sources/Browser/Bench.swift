@@ -296,7 +296,7 @@ final class Bench {
 
         case "select":
             // Picking a tab takes the window over, which the bench never does
-            // to someone using it: only on a SEARCH_PROBE run.
+            // to someone using it: only on a BROWSER_PROBE run.
             guard Store.testing else {
                 answer(["error": "select only works on a --test run — it would take your window over"])
                 return
@@ -349,7 +349,7 @@ final class Bench {
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             house(tab)
             let path = (request["path"] as? String)
-                ?? NSTemporaryDirectory() + "search-bench-\(Bench.short(tab)).png"
+                ?? NSTemporaryDirectory() + "browser-bench-\(Bench.short(tab)).png"
             let width = request["width"] as? Double
             shoot(tab, to: URL(fileURLWithPath: path), width: width, answer)
 
@@ -395,7 +395,7 @@ final class Bench {
         case "key":
             // Keys pressed on a tab, as real key events handed to its view —
             // for what the page does with them, and what comes back unused.
-            // Only on a SEARCH_PROBE run: it types into a page.
+            // Only on a BROWSER_PROBE run: it types into a page.
             guard Store.testing else { answer(["error": "key only works on a --test run — it would type into your page"]); return }
             guard let tab = find(request, in: browser), let text = request["text"] as? String else { answer(missing(request)); return }
             house(tab)
@@ -431,7 +431,7 @@ final class Bench {
         case "press":
             // A key, with modifiers, through the app's own event queue — so
             // the key monitor and the menus see it as they see a hand's, not
-            // only the page. Only on a SEARCH_PROBE run.
+            // only the page. Only on a BROWSER_PROBE run.
             guard Store.testing else { answer(["error": "press only works on a --test run"]); return }
             guard let key = request["key"] as? String, let first = key.first, let window = Links.window else {
                 answer(["error": "press needs a key"])
@@ -489,7 +489,7 @@ final class Bench {
             // A press, a drag along a path and a release, at points measured
             // from the window's top-left corner, through the event queue —
             // for the strip, the tabs and what a double-click does. Only on
-            // a SEARCH_PROBE run.
+            // a BROWSER_PROBE run.
             guard Store.testing else { answer(["error": "mouse only works on a --test run"]); return }
             guard let window = Links.window, let path = request["path"] as? [[Double]],
                   let first = path.first, first.count == 2
@@ -549,7 +549,7 @@ final class Bench {
         case "newtab":
             // How long ⌘T takes: the new tab made, the window laid out and
             // drawn, and the frame handed to the screen — the work, not the
-            // animation that follows it. Only on a SEARCH_PROBE run.
+            // animation that follows it. Only on a BROWSER_PROBE run.
             guard Store.testing else { answer(["error": "newtab only works on a --test run"]); return }
             let start = CACurrentMediaTime()
             browser.newTab()
@@ -597,7 +597,7 @@ final class Bench {
         case "resize":
             // The window taken to another size in steps, a frame apart, the
             // way a hand drags its corner — for what that does to the title
-            // bar. It moves the window, so only on a SEARCH_PROBE run.
+            // bar. It moves the window, so only on a BROWSER_PROBE run.
             guard Store.testing else {
                 answer(["error": "resize only works on a --test run — it would move your window"])
                 return

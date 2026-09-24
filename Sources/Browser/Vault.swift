@@ -23,7 +23,10 @@ struct Login: Identifiable, Equatable, Hashable {
 enum Vault {
     /// What every item of ours is tagged with. A test run tags its own, so a
     /// password saved while trying something never sits among the real ones.
-    private static let label = Store.world.map { "Search (\($0))" } ?? "Search"
+    private static let label = Store.world.map { "Browser (\($0))" } ?? "Browser"
+    /// Items kept before the rename carry the old label; they are read as
+    /// well, and take the new one the next time they are saved or used.
+    private static let formerLabel = Store.world.map { "Search (\($0))" } ?? "Search"
 
     /// Every call here is a trip to securityd, and every write a transaction
     /// on the login keychain file that waits for the disk. On the main
@@ -32,7 +35,7 @@ enum Vault {
     /// compiled beside it, froze it for as long as the commits took
     /// (23 Sep 2026). So the keychain is spoken to from here, one call at a
     /// time, and the window hears back on its own thread.
-    static let queue = DispatchQueue(label: "com.officecommun.search.vault", qos: .userInitiated)
+    static let queue = DispatchQueue(label: "com.agencidev.browser.vault", qos: .userInitiated)
 
     /// `work` off the main thread; its answer handed back on it.
     static func off<T>(_ work: @escaping () -> T, then done: @escaping (T) -> Void) {
@@ -78,6 +81,10 @@ enum Vault {
 
     /// The items' attributes — no secrets — narrowed by whatever is given.
     private static func rows(where extra: [String: Any]) -> [[String: Any]] {
+        rows(labelled: label, where: extra) + rows(labelled: formerLabel, where: extra)
+    }
+
+    private static func rows(labelled label: String, where extra: [String: Any]) -> [[String: Any]] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassInternetPassword,
             kSecAttrLabel as String: label,

@@ -516,7 +516,7 @@ enum ExtensionShims {
       // it can't: a rejection, or lastError for a callback.
       const refuse = (what) => (...args) => {
         const callback = args.length && typeof args[args.length - 1] === "function" ? args.pop() : null;
-        const error = new Error(what + " isn't available in Search");
+        const error = new Error(what + " isn't available in Browser");
         if (!callback) return Promise.reject(error);
         withLastError(error, callback);
       };
@@ -1806,7 +1806,7 @@ enum ExtensionShims {
 
     static func answer(_ message: Any, from context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
         guard let body = message as? [String: Any], let api = body["api"] as? String else {
-            return ["error": "Not a Search message"]
+            return ["error": "Not a Browser message"]
         }
         let args = body["args"] as? [Any] ?? []
         do {
@@ -1962,7 +1962,7 @@ enum ExtensionShims {
         case "downloads.erase":
             return []
         case "downloads.pause", "downloads.resume", "downloads.cancel", "downloads.removeFile", "downloads.getFileIcon":
-            throw Unsupported(what: "\(api) isn't available in Search yet")
+            throw Unsupported(what: "\(api) isn't available in Browser yet")
 
         // MARK: side panel — a tab of its own, since this window has one column
         case "sidePanel.setOptions":
@@ -2239,7 +2239,7 @@ enum ExtensionShims {
             if let old = awake[id] { IOPMAssertionRelease(old) }
             var assertion: IOPMAssertionID = 0
             let kind = (display ? kIOPMAssertionTypePreventUserIdleDisplaySleep : kIOPMAssertionTypePreventUserIdleSystemSleep) as CFString
-            if IOPMAssertionCreateWithName(kind, IOPMAssertionLevel(kIOPMAssertionLevelOn), "An extension in Search" as CFString, &assertion) == kIOReturnSuccess {
+            if IOPMAssertionCreateWithName(kind, IOPMAssertionLevel(kIOPMAssertionLevelOn), "An extension in Browser" as CFString, &assertion) == kIOReturnSuccess {
                 awake[id] = assertion
             }
             return nil
@@ -2248,7 +2248,7 @@ enum ExtensionShims {
             return nil
         case "power.reportActivity":
             var assertion: IOPMAssertionID = 0
-            IOPMAssertionDeclareUserActivity("An extension in Search" as CFString, kIOPMUserActiveLocal, &assertion)
+            IOPMAssertionDeclareUserActivity("An extension in Browser" as CFString, kIOPMUserActiveLocal, &assertion)
             return nil
 
         // MARK: browsing data
@@ -2302,7 +2302,7 @@ enum ExtensionShims {
         case "readingList.query":
             return []
         case "readingList.addEntry", "readingList.removeEntry", "readingList.updateEntry":
-            throw Unsupported(what: "Search has no reading list")
+            throw Unsupported(what: "Browser has no reading list")
 
         // MARK: system
         case "system.cpu.getInfo":
@@ -2325,7 +2325,7 @@ enum ExtensionShims {
         case "tabGroups.query":
             return []
         case "tabGroups.get", "tabGroups.update", "tabGroups.move":
-            throw Unsupported(what: "Search has no tab groups")
+            throw Unsupported(what: "Browser has no tab groups")
 
         // MARK: identity
         case "identity.launchWebAuthFlow":
@@ -2340,7 +2340,7 @@ enum ExtensionShims {
             throw Unsupported(what: "getAuthToken needs a Google account signed into Chrome; this extension would need launchWebAuthFlow instead")
 
         default:
-            throw Unsupported(what: "\(api) isn't available in Search")
+            throw Unsupported(what: "\(api) isn't available in Browser")
         }
     }
 

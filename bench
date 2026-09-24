@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive the Search you already have open, from the shell.
+"""Drive the Browser you already have open, from the shell.
 
     ./bench tabs                       every tab, yours and the bench's
     ./bench open URL                   a bench tab at the end of the row → its id
@@ -37,10 +37,10 @@
     ./bench ui KEY VALUE               settings/passwords/welcome/history/downloads/bookmarks/hidden on|off,
                                        look light|dark|system, sidebar on|off
 
-Needs Settings › General › "Let a script drive Search" switched on in the
+Needs Settings › General › "Let a script drive Browser" switched on in the
 running app. IDs are the first characters of a tab's id, as `tabs` prints
-them. With --test, talks to a SEARCH_PROBE run instead of the real one;
-with --world NAME, to a SEARCH_PROBE=NAME run, the world "Search (NAME)".
+them. With --test, talks to a BROWSER_PROBE run instead of the real one;
+with --world NAME, to a BROWSER_PROBE=NAME run, the world "Browser (NAME)".
 """
 
 import json
@@ -49,7 +49,7 @@ import socket
 import sys
 
 def folder(world):
-    name = f"Search ({world})" if world else "Search"
+    name = f"Browser ({world})" if world else "Browser"
     return os.path.expanduser(f"~/Library/Application Support/{name}")
 
 def ask(path, request):
@@ -57,8 +57,8 @@ def ask(path, request):
         try:
             s.connect(path)
         except (FileNotFoundError, ConnectionRefusedError):
-            sys.exit("Search isn't listening — is it open, with Settings › General › "
-                     "“Let a script drive Search” on?")
+            sys.exit("Browser isn't listening — is it open, with Settings › General › "
+                     "“Let a script drive Browser” on?")
         s.sendall((json.dumps(request) + "\n").encode())
         chunks = []
         while True:

@@ -643,7 +643,7 @@ final class Extensions: NSObject, ObservableObject {
 
     private func ask(install name: String, wants: [String], icon: NSImage?) async -> Bool {
         await ask(
-            "Add “\(name)” to Search?",
+            "Add “\(name)” to Browser?",
             detail: wants.isEmpty ? "It doesn't ask for anything special." : "It will be able to:\n• " + wants.joined(separator: "\n• "),
             icon: icon, yes: "Add Extension", no: "Cancel"
         )
@@ -952,7 +952,7 @@ final class ExtensionWindow: NSObject, WKWebExtensionWindow {
     init(owner: Extensions) { self.owner = owner }
 
     private var nsWindow: NSWindow? {
-        NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.frameAutosaveName == "search" }
+        NSApp.windows.first { $0.isVisible && $0.contentView != nil && $0.frameAutosaveName == "browser" }
             ?? NSApp.mainWindow
     }
 

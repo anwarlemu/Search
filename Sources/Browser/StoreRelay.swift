@@ -103,7 +103,7 @@ final class StoreRelay: NSObject, WKScriptMessageHandler {
         var id = pageID();
         var installed = !!id && state.installed.indexOf(id) >= 0;
         var busy = !!id && state.busy === id;
-        label(ours, installed ? 'Added to Search' : (busy ? 'Adding…' : 'Add to Search'));
+        label(ours, installed ? 'Added to Browser' : (busy ? 'Adding…' : 'Add to Browser'));
         ours.disabled = installed || busy;
       }
 

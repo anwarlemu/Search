@@ -16,7 +16,7 @@ For anything beyond a small fix, open an issue first describing what you want to
 ## What doesn't
 
 - Rewrites of things that already work, for style reasons alone.
-- Anything that phones home, adds analytics, or changes what leaves the app over the network — see the [privacy page](https://officecommun.com/search/privacy) for what that boundary currently is.
+- Anything that phones home, adds analytics, or changes what leaves the app over the network — the README's privacy table is what that boundary currently is.
 - Vendoring Chromium or any other engine. This is a WebKit browser on purpose.
 
 ## Review
@@ -25,4 +25,4 @@ Pull requests are reviewed by Drice, usually with Claude Code doing a first pass
 
 ## Reporting a bug
 
-Open an issue with: what you did, what you expected, what happened instead, and your macOS version. A crash log, if there is one, lives at `~/Library/Application Support/Search/crash.log` — it only ever stays on your Mac unless you paste it into the issue yourself.
+Open an issue with: what you did, what you expected, what happened instead, and your macOS version. A crash log, if there is one, lives at `~/Library/Application Support/Browser/crash.log` — it only ever stays on your Mac unless you paste it into the issue yourself.

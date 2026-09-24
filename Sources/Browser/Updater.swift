@@ -29,18 +29,19 @@ import Security
 final class Updater: ObservableObject {
     static let shared = Updater()
 
-    /// Where the file lives. SEARCH_FEED, for a test run, points somewhere
+    /// Where the file lives. BROWSER_FEED, for a test run, points somewhere
     /// else — and is the only way plain http is accepted, so a build that
     /// was not handed the variable only ever listens to the real site.
-    static let feed: URL = {
-        if let set = ProcessInfo.processInfo.environment["SEARCH_FEED"], let url = URL(string: set) {
-            return url
-        }
-        return URL(string: "https://officecommun.com/search/appcast.json")!
+    /// Nowhere, unless BROWSER_FEED says where. This browser began as the
+    /// open-source Search, whose feed would offer Search's own builds; it
+    /// asks no one until it has a feed of its own.
+    static let feed: URL? = {
+        guard let set = ProcessInfo.processInfo.environment["BROWSER_FEED"] else { return nil }
+        return URL(string: set)
     }()
 
     private static var overridden: Bool {
-        ProcessInfo.processInfo.environment["SEARCH_FEED"] != nil
+        ProcessInfo.processInfo.environment["BROWSER_FEED"] != nil
     }
 
     struct Release: Equatable {
@@ -129,6 +130,7 @@ final class Updater: ObservableObject {
     private var clock: Timer?
 
     private func checkIfDue() {
+        guard Updater.feed != nil else { return }
         let last = Store.settings.object(forKey: lastKey) as? Date ?? .distantPast
         guard Updater.overridden || Date().timeIntervalSince(last) > 60 * 60 * 20 else { return }
         check { _ in }
@@ -184,8 +186,8 @@ final class Updater: ObservableObject {
         guard case .fetching(let fetching) = stage, fetching == release else { return }
         stage = worked ? .ready(release) : .offered(release)
         say?(worked
-            ? "Search \(release.version) is ready — it's there the next time you open it"
-            : "Search \(release.version) is out — it's in Settings")
+            ? "Browser \(release.version) is ready — it's there the next time you open it"
+            : "Browser \(release.version) is out — it's in Settings")
     }
 
     /// Quit, and come back as the new one. A shell waits for this process
@@ -208,7 +210,7 @@ final class Updater: ObservableObject {
     /// environment and a relaunch must not land on the real data.
     private static var reopen: [String] {
         var arguments = ["/usr/bin/open"]
-        for key in ["SEARCH_PROBE", "SEARCH_FEED"] {
+        for key in ["BROWSER_PROBE", "BROWSER_FEED"] {
             if let value = ProcessInfo.processInfo.environment[key] {
                 arguments += ["--env", "\(key)=\(value)"]
             }
@@ -217,6 +219,7 @@ final class Updater: ObservableObject {
     }
 
     private static func fetch() async -> Release? {
+        guard let feed else { return nil }
         var request = URLRequest(url: feed)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 12
@@ -283,11 +286,11 @@ private enum Swap {
         // a rename too. Cleared whatever happens.
         let scratch = (try? files.url(
             for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: target, create: true
-        )) ?? files.temporaryDirectory.appendingPathComponent("search-update-\(release.build)", isDirectory: true)
+        )) ?? files.temporaryDirectory.appendingPathComponent("browser-update-\(release.build)", isDirectory: true)
         try files.createDirectory(at: scratch, withIntermediateDirectories: true)
         defer { try? files.removeItem(at: scratch) }
 
-        let zip = scratch.appendingPathComponent("Search.zip")
+        let zip = scratch.appendingPathComponent("Browser.zip")
         try await download(release.archive, to: zip)
         if let expected = release.sha256 {
             guard try digest(of: zip) == expected else { throw Refused.hash }
