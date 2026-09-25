@@ -104,11 +104,14 @@ struct ProfileDoor: View {
                 Button("Rename…") { browser.renameProfile() }
                 Button("Delete") { browser.deleteCurrentProfile() }
             } label: {
-                Text(browser.profileNames[browser.profile])
-                    .font(.system(size: 11.5, weight: .medium))
+                // The number, not the name: the row stays the same width
+                // whatever a profile is called. The name is in the list
+                // behind it, and on hover.
+                Text("\(browser.profile + 1)")
+                    .font(.system(size: 11.5, weight: .medium).monospacedDigit())
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
-                    .padding(.horizontal, 8)
+                    .frame(minWidth: 26)
                     .frame(height: 26)
                     .background(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -118,7 +121,7 @@ struct ProfileDoor: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Profile   " + ((browser.keys.chord(for: .profileNumber)?.label).map { "\($0) \($0.dropLast())2 …" } ?? ""))
+            .help("Profile \(browser.profile + 1) · \(browser.profileNames[browser.profile])   " + ((browser.keys.chord(for: .profileNumber)?.label).map { "\($0) \($0.dropLast())2 …" } ?? ""))
         }
     }
 }
