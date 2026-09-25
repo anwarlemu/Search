@@ -701,6 +701,20 @@ struct TabMenu: View {
             Button("Close \(count) Tabs") { browser.closeChosen() }
             Divider()
         }
+        if !browser.isPrivate, !(browser.chosen.count > 1 && browser.chosen.contains(tab.id)) {
+            // This one tab to another profile — asleep there, where it was.
+            Menu("Move to Profile") {
+                ForEach(Array(browser.profileNames.enumerated()), id: \.offset) { index, name in
+                    if index != browser.profile {
+                        Button(name) { browser.move([tab], toProfile: index) }
+                    }
+                }
+                if browser.profileNames.count > 1 { Divider() }
+                Button("New Profile…") { browser.moveToNewProfile(tab) }
+            }
+            .disabled(tab.isBlank)
+            Divider()
+        }
         if tab.pin == nil {
             Button("Pin") { browser.pin(tab) }
                 .disabled(tab.isBlank)

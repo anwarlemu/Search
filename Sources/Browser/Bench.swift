@@ -653,6 +653,8 @@ final class Bench {
             if let index = request["profile"] as? Int { browser.switchProfile(to: index) }
             if let on = request["peek"] as? Bool { browser.peeking = on }
             if request["floatReturn"] as? Bool == true { browser.floater.onReturn?() }
+            // The tab menu's Move to Profile, for one tab.
+            if let index = request["moveTo"] as? Int, let tab = find(request, in: browser) { browser.move([tab], toProfile: index) }
             if request["closePrivate"] as? Bool == true {
                 for other in Browser.every.allObjects where other.isPrivate { other.window?.close() }
             }

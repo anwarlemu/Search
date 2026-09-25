@@ -70,6 +70,16 @@ extension Browser {
 
     /// A name asked for, the profile made, the tabs moved into it — and
     /// straight into it, as a new profile always goes.
+    /// One tab into a profile made for it, and straight into that profile.
+    func moveToNewProfile(_ tab: Tab) {
+        askProfileName("New profile from this tab") { [weak self] name in
+            guard let self else { return }
+            let index = makeProfile(named: name)
+            move([tab], toProfile: index)
+            switchProfile(to: index)
+        }
+    }
+
     func moveChosenToNewProfile() {
         let list = chosenTabs
         guard !list.isEmpty else { return }

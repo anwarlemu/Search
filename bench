@@ -120,6 +120,9 @@ def main(argv):
         key, value = args
         if key in ("look", "newProfile", "record"): request[key] = value
         elif key in ("profile", "deleteProfile", "moveChosen"): request[key] = int(value)
+        elif key == "moveTo":
+            tab, _, to = value.partition(":")
+            request["id"], request["moveTo"] = tab, int(to)
         else: request[key] = value in ("on", "true", "1", "yes")
     elif verb in ("ext-add", "ext-press", "ext-remove", "ext-reload"):
         if len(args) != 1: sys.exit(f"usage: bench {verb} ID")
