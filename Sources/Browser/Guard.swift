@@ -20,24 +20,36 @@ import AppKit
 enum ViewBridgeGuard {
     @MainActor private static var installed = false
 
+    /// Every one of the remote view's window notifications that asserts
+    /// when it is told about a window that isn't its own — found by calling
+    /// each on a detached remote view (25 Sep 2026): will and did order on
+    /// screen, will and did order off, and a change of occlusion. Moving is
+    /// harmless but guarded the same way.
+    private static let handlers = [
+        "containingWindowWillOrderOnScreen:", "containingWindowDidOrderOnScreen:",
+        "containingWindowWillOrderOffScreen:", "containingWindowDidOrderOffScreen:",
+        "containingWindowDidChangeOcclusionState:", "containingWindowDidMove:",
+    ]
+
     @MainActor static func install() {
         guard !installed else { return }
         installed = true
-        let selector = NSSelectorFromString("containingWindowWillOrderOnScreen:")
         if NSClassFromString("NSRemoteView") == nil {
             _ = dlopen("/System/Library/PrivateFrameworks/ViewBridge.framework/ViewBridge", RTLD_NOW)
         }
-        guard let remote = NSClassFromString("NSRemoteView"),
-              let method = class_getInstanceMethod(remote, selector)
-        else { return }
-        typealias Original = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
-        let original = unsafeBitCast(method_getImplementation(method), to: Original.self)
-        let guarded: @convention(block) (AnyObject, AnyObject?) -> Void = { view, note in
-            let own = (view as? NSView)?.window
-            let about = (note as? NSNotification)?.object as AnyObject?
-            guard let own, about === own else { return }
-            original(view, selector, note)
+        guard let remote = NSClassFromString("NSRemoteView") else { return }
+        for name in handlers {
+            let selector = NSSelectorFromString(name)
+            guard let method = class_getInstanceMethod(remote, selector) else { continue }
+            typealias Original = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
+            let original = unsafeBitCast(method_getImplementation(method), to: Original.self)
+            let guarded: @convention(block) (AnyObject, AnyObject?) -> Void = { view, note in
+                let own = (view as? NSView)?.window
+                let about = (note as? NSNotification)?.object as AnyObject?
+                guard let own, about === own else { return }
+                original(view, selector, note)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(guarded))
         }
-        method_setImplementation(method, imp_implementationWithBlock(guarded))
     }
 }

@@ -383,6 +383,7 @@ final class Bench {
                 "asking": browser.asking.map { "\($0.host) \($0.wants)" } ?? "",
                 "bare": browser.prefs.bare,
                 "peeking": browser.peeking,
+                "floatShowing": browser.floater.showing,
                 "profiles": browser.profileNames,
                 "profile": browser.profile,
                 "chosen": browser.chosenTabs.map(Bench.short),
@@ -651,6 +652,7 @@ final class Bench {
             if let yes = request["allow"] as? Bool { yes ? browser.allowCapture() : browser.denyCapture() }
             if let index = request["profile"] as? Int { browser.switchProfile(to: index) }
             if let on = request["peek"] as? Bool { browser.peeking = on }
+            if request["floatReturn"] as? Bool == true { browser.floater.onReturn?() }
             if request["closePrivate"] as? Bool == true {
                 for other in Browser.every.allObjects where other.isPrivate { other.window?.close() }
             }

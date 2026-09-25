@@ -941,8 +941,10 @@ final class Browser: NSObject, ObservableObject {
             if let came, let tab = self.tab(came) {
                 self.reveal(tab)
             }
-            NSApp.activate(ignoringOtherApps: true)
-            NSApp.windows.first { $0.contentView != nil }?.makeKeyAndOrderFront(nil)
+            // This window — the one the video came from — not whichever the
+            // app lists first, which could be a private window, the bench's
+            // room or the little window itself.
+            if let home = self.window ?? Links.window { Browser.bringForward(home) }
         }
         floater.onSkip = { [weak self] seconds in
             guard let self, let id = self.floating, let tab = self.tab(id) else { return }
@@ -1040,6 +1042,16 @@ final class Browser: NSObject, ObservableObject {
         Browser.every.remove(self)
     }
 
+    /// The window in front, and the app with it. The window is ordered to
+    /// the front regardless, since macOS may hold back activating an app that
+    /// isn't in front; the click that asked for it is what lets it through.
+    static func bringForward(_ window: NSWindow) {
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.orderFrontRegardless()
+        if #available(macOS 14.0, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
+        window.makeKeyAndOrderFront(nil)
+    }
+
     /// A private window starts with one empty tab, and with nothing that
     /// reaches beyond it: no session read, no extensions, no bench, no
     /// updater, no taking over the icons that arrive for the main window.
@@ -1056,8 +1068,7 @@ final class Browser: NSObject, ObservableObject {
             let came = floating
             land()
             if let came, let found = self.tab(came) { reveal(found) }
-            NSApp.activate(ignoringOtherApps: true)
-            window?.makeKeyAndOrderFront(nil)
+            if let window { Browser.bringForward(window) }
         }
         let tab = freshTab()
         adopt(tab)
@@ -1559,28 +1570,21 @@ final class Browser: NSObject, ObservableObject {
         // A hero background on a studio's home page is a video too, and it
         // followed people around the desktop. ⌘⇧P still lifts from anywhere.
         if quietly, !Players.knows(tab.address) { return }
-        // Asked first, moved second, laid out last. Pinning the video while
-        // the page was still in the main window, then moving it, left
-        // WebKit drawing the picture where the main window had put it —
-        // down by the height of the strip, and cut off at the bottom
-        // (YouTube, 25 Sep 2026). Laid out once it is in the little window,
-        // it is drawn where it is.
-        tab.web.evaluateJavaScript(Isolate.playing) { [weak self] answer, _ in
+        // Isolated where it is, then moved: pinned only once it was in the
+        // little window, the video drew nothing at all (25 Sep 2026). Moved,
+        // it is laid out once more, so the picture is placed for the window
+        // it is in now rather than where the main window had it.
+        tab.web.evaluateJavaScript(Isolate.on) { [weak self] answer, _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                guard (answer as? Bool) == true else {
+                guard (answer as? String) == "floating" else {
                     if !quietly { self.announce("Nothing is playing here") }
                     return
                 }
                 self.floating = tab.id
                 tab.floating = true
                 self.floater.lift(tab.web)
-                tab.web.evaluateJavaScript(Isolate.on) { [weak self] answer, _ in
-                    MainActor.assumeIsolated {
-                        // Gone between the asking and the moving: home again.
-                        if (answer as? String) != "floating" { self?.land() }
-                    }
-                }
+                tab.web.evaluateJavaScript(Isolate.refit)
             }
         }
     }

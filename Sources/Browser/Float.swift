@@ -520,18 +520,6 @@ private final class Panel: NSPanel {
 }
 
 enum Isolate {
-    /// Whether anything is playing that could be lifted out.
-    static let playing = """
-    (function () {
-      var videos = document.querySelectorAll('video');
-      for (var i = 0; i < videos.length; i++) {
-        var v = videos[i];
-        if (!v.paused && !v.ended && v.readyState >= 2) return true;
-      }
-      return false;
-    })();
-    """
-
     /// Everything but the video, out of the way. Visibility is inherited, so
     /// hiding the body and turning it back on for the video alone leaves the
     /// player's own machinery running untouched — which is what keeps the
@@ -571,13 +559,6 @@ enum Isolate {
         'display:none !important}'
       ].join('');
       document.documentElement.classList.add('office-floating');
-      // One frame at a slightly different size, then back: the video's
-      // picture is placed again for the window it is in now, rather than
-      // left where the last layout put it.
-      best.style.setProperty('width', 'calc(100vw - 1px)', 'important');
-      requestAnimationFrame(function () {
-        requestAnimationFrame(function () { best.style.removeProperty('width'); });
-      });
 
       // The mark has to be defended.
       //
@@ -607,6 +588,21 @@ enum Isolate {
       }, 250);
 
       return 'floating';
+    })();
+    """
+
+    /// Once the page is in the little window: one frame at a slightly
+    /// different size, then back, so the video's picture is placed again for
+    /// the window it is in now.
+    static let refit = """
+    (function () {
+      var v = document.querySelector('[data-office-float]');
+      if (!v) return false;
+      v.style.setProperty('width', 'calc(100vw - 1px)', 'important');
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () { v.style.removeProperty('width'); });
+      });
+      return true;
     })();
     """
 
