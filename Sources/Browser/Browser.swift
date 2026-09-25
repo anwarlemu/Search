@@ -1559,16 +1559,28 @@ final class Browser: NSObject, ObservableObject {
         // A hero background on a studio's home page is a video too, and it
         // followed people around the desktop. ⌘⇧P still lifts from anywhere.
         if quietly, !Players.knows(tab.address) { return }
-        tab.web.evaluateJavaScript(Isolate.on) { [weak self] answer, _ in
+        // Asked first, moved second, laid out last. Pinning the video while
+        // the page was still in the main window, then moving it, left
+        // WebKit drawing the picture where the main window had put it —
+        // down by the height of the strip, and cut off at the bottom
+        // (YouTube, 25 Sep 2026). Laid out once it is in the little window,
+        // it is drawn where it is.
+        tab.web.evaluateJavaScript(Isolate.playing) { [weak self] answer, _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                guard (answer as? String) == "floating" else {
+                guard (answer as? Bool) == true else {
                     if !quietly { self.announce("Nothing is playing here") }
                     return
                 }
                 self.floating = tab.id
                 tab.floating = true
                 self.floater.lift(tab.web)
+                tab.web.evaluateJavaScript(Isolate.on) { [weak self] answer, _ in
+                    MainActor.assumeIsolated {
+                        // Gone between the asking and the moving: home again.
+                        if (answer as? String) != "floating" { self?.land() }
+                    }
+                }
             }
         }
     }
