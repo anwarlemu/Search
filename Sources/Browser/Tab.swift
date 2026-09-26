@@ -1160,9 +1160,11 @@ final class PageView: WKWebView {
     private var taking = false
 
     /// How far the fingers travel before letting go means it.
-    private static let arm: CGFloat = 110
+    /// Half as far again as it was (110): a sideways nudge while reading
+    /// no longer turns the page (26 Sep 2026).
+    static let arm: CGFloat = 170
     /// Less than this and there is nothing to show yet — or nothing left to.
-    private static let show: CGFloat = 6
+    private static let show: CGFloat = 18
 
     // MARK: - two fingers together
 
@@ -1291,8 +1293,11 @@ final class PageView: WKWebView {
                 gatheredX += abs(event.scrollingDeltaX)
                 gatheredY += abs(event.scrollingDeltaY)
                 sideways += event.scrollingDeltaX
-                guard gatheredX + gatheredY > 6 else { return }
-                axis = gatheredX > gatheredY * 1.3 ? .across : .down
+                // Decided over a little more travel, and only a plainly
+                // sideways gesture counts: a scroll that drifts sideways
+                // stays a scroll.
+                guard gatheredX + gatheredY > 14 else { return }
+                axis = gatheredX > gatheredY * 2.2 ? .across : .down
                 if axis == .down {
                     spent = true
                     return

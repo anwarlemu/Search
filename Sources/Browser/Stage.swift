@@ -103,8 +103,8 @@ private struct Disc: View {
 
     var body: some View {
         // The fingers can travel as far as they like; the disc stops short.
-        let reach = 150 * (1 - exp(-pull.travel / 110))
-        let grown = min(1, pull.travel / 110)
+        let reach = 150 * (1 - exp(-pull.travel / PageView.arm))
+        let grown = min(1, pull.travel / PageView.arm)
         let scale: CGFloat = pull.going ? 1.08 : 0.86 + 0.14 * grown
 
         ZStack {
