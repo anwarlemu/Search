@@ -176,6 +176,10 @@ def main(argv):
     elif verb == "hover":
         if len(args) != 1: sys.exit("usage: bench hover ID")
         request["id"] = args[0]
+    elif verb == "rightclick":
+        if len(args) not in (1, 2): sys.exit("usage: bench rightclick X,Y [SECONDS]")
+        request["path"] = [[float(n) for n in args[0].split(",")]]
+        if len(args) == 2: request["hold"] = float(args[1])
     elif verb == "hit":
         if len(args) != 1: sys.exit("usage: bench hit X,Y")
         request["path"] = [[float(n) for n in args[0].split(",")]]

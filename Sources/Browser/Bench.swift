@@ -592,6 +592,43 @@ final class Bench {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { answer(["hovered": tab.hovered ?? ""]) }
 
+        case "rightclick":
+            // A right-click at a point from the window's top-left, through the
+            // event queue — for what menu, if any, comes up. The answer comes
+            // back once the menu has been dismissed a moment later.
+            guard Store.testing else { answer(["error": "rightclick only works on a --test run"]); return }
+            guard let window = Links.window, let path = request["path"] as? [[Double]], let p = path.first, p.count == 2 else { answer(["error": "rightclick needs a point"]); return }
+            let at = NSPoint(x: p[0], y: window.frame.height - p[1])
+            var seen: [String] = []
+            let watch = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { note in
+                let menu = note.object as? NSMenu
+                guard menu !== NSApp.mainMenu, menu?.supermenu == nil else { return }
+                // Read a moment later too: some menus fill themselves in after
+                // they open.
+                func read() -> [String] {
+                    (menu?.items ?? []).map { item in
+                        if item.isSeparatorItem { return "—" }
+                        let what = item.title.isEmpty ? "<untitled\(item.view != nil ? " view " + String(describing: type(of: item.view!)) : "")\(item.isHidden ? " hidden" : "")>" : item.title
+                        return what + (item.submenu.map { " ›\($0.items.count)" } ?? "") + (item.action.map { " [\(NSStringFromSelector($0))]" } ?? "")
+                    }
+                }
+                seen = ["class " + String(describing: type(of: menu as Any))] + read()
+                DispatchQueue.main.asyncAfter(deadline: .now() + ((request["hold"] as? Double) ?? 0.3)) {
+                    seen.append("later: " + read().joined(separator: " | "))
+                    menu?.cancelTracking()
+                }
+            }
+            for type in [NSEvent.EventType.rightMouseDown, .rightMouseUp] {
+                if let e = NSEvent.mouseEvent(with: type, location: at, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                              windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
+                    NSApp.postEvent(e, atStart: false)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + ((request["hold"] as? Double) ?? 0)) {
+                NotificationCenter.default.removeObserver(watch)
+                answer(["menu": seen])
+            }
+
         case "hit":
             // Which view a click at a point, from the window's top-left,
             // would land on — the chain of views from it up to the window —
