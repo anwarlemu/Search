@@ -536,7 +536,20 @@ enum Isolate {
       }
       if (!best) return 'none';
 
-      best.setAttribute('data-office-float', '');
+      // Out from under the player, to the top of the page. Left where it
+      // was, pinned to the viewport inside boxes the player draws as layers
+      // of their own, WebKit kept drawing the picture where the player had
+      // it: a black band the height of YouTube's header across the top and
+      // the bottom cut off — or, for a video further down a page, nothing
+      // but black (28 Sep 2026). A video moved within a page in one go
+      // plays on; its place is remembered for the way back.
+      function lift(v) {
+        v.setAttribute('data-office-float', '');
+        if (v.parentNode === document.documentElement) return;
+        window.__officeFloatHome = { video: v, parent: v.parentNode, next: v.nextSibling };
+        document.documentElement.appendChild(v);
+      }
+      lift(best);
       var sheet = document.getElementById('office-float');
       if (!sheet) {
         sheet = document.createElement('style');
@@ -572,7 +585,11 @@ enum Isolate {
       // second, for as long as the page is out.
       clearInterval(window.__officeFloatWatch);
       window.__officeFloatWatch = setInterval(function () {
-        if (document.querySelector('[data-office-float]')) return;
+        var held = document.querySelector('[data-office-float]');
+        if (held) {
+          if (held.parentNode !== document.documentElement) lift(held);
+          return;
+        }
         var again = null, most = 0;
         var all = document.querySelectorAll('video');
         for (var j = 0; j < all.length; j++) {
@@ -584,25 +601,10 @@ enum Isolate {
             again = one;
           }
         }
-        if (again) again.setAttribute('data-office-float', '');
+        if (again) lift(again);
       }, 250);
 
       return 'floating';
-    })();
-    """
-
-    /// Once the page is in the little window: one frame at a slightly
-    /// different size, then back, so the video's picture is placed again for
-    /// the window it is in now.
-    static let refit = """
-    (function () {
-      var v = document.querySelector('[data-office-float]');
-      if (!v) return false;
-      v.style.setProperty('width', 'calc(100vw - 1px)', 'important');
-      requestAnimationFrame(function () {
-        requestAnimationFrame(function () { v.style.removeProperty('width'); });
-      });
-      return true;
     })();
     """
 
@@ -640,8 +642,20 @@ enum Isolate {
     })();
     """
 
-    static let off = """
-    (function () {
+    /// Back where it came from. `pausing` is the window's own ×: a video you
+    /// closed stops, rather than playing on out of sight in a tab you
+    /// aren't looking at.
+    static func off(pausing: Bool) -> String {
+        """
+        (function () {
+          var video = document.querySelector('[data-office-float]');
+          if (video && \(pausing)) video.pause();
+          \(offBody)
+        })();
+        """
+    }
+
+    private static let offBody = """
       // The engine may have put the video in its own floating window as well —
       // some players ask for that themselves. Leaving one and not the other
       // leaves you with two.
@@ -664,8 +678,12 @@ enum Isolate {
       var sheet = document.getElementById('office-float');
       if (sheet) sheet.textContent = '';
       var video = document.querySelector('[data-office-float]');
+      var home = window.__officeFloatHome;
+      window.__officeFloatHome = null;
+      if (home && home.video.parentNode === document.documentElement) {
+        home.parent.insertBefore(home.video, home.next && home.next.parentNode === home.parent ? home.next : null);
+      }
       if (video) video.removeAttribute('data-office-float');
       return 'landed';
-    })();
     """
 }

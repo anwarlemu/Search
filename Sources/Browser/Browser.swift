@@ -968,7 +968,7 @@ final class Browser: NSObject, ObservableObject {
                 MainActor.assumeIsolated { answer((playing as? Bool) ?? true) }
             }
         }
-        floater.onClose = { [weak self] in self?.land() }
+        floater.onClose = { [weak self] in self?.land(pausing: true) }
 
         // Yesterday's tabs, or one empty one. Either way a web view is built
         // now, which starts a content process while the window is still being
@@ -1062,7 +1062,7 @@ final class Browser: NSObject, ObservableObject {
         bookmarks.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         prefs.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         keys.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
-        floater.onClose = { [weak self] in self?.land() }
+        floater.onClose = { [weak self] in self?.land(pausing: true) }
         floater.onReturn = { [weak self] in
             guard let self else { return }
             let came = floating
@@ -1571,9 +1571,7 @@ final class Browser: NSObject, ObservableObject {
         // followed people around the desktop. ⌘⇧P still lifts from anywhere.
         if quietly, !Players.knows(tab.address) { return }
         // Isolated where it is, then moved: pinned only once it was in the
-        // little window, the video drew nothing at all (25 Sep 2026). Moved,
-        // it is laid out once more, so the picture is placed for the window
-        // it is in now rather than where the main window had it.
+        // little window, the video drew nothing at all (25 Sep 2026).
         tab.web.evaluateJavaScript(Isolate.on) { [weak self] answer, _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -1584,21 +1582,21 @@ final class Browser: NSObject, ObservableObject {
                 self.floating = tab.id
                 tab.floating = true
                 self.floater.lift(tab.web)
-                tab.web.evaluateJavaScript(Isolate.refit)
             }
         }
     }
 
     /// Back into its tab. The stage takes the page again on its next layout,
-    /// which is what the self-healing there is for.
-    func land() {
+    /// which is what the self-healing there is for. `pausing` is the little
+    /// window's ×, which stops the video as well as closing.
+    func land(pausing: Bool = false) {
         // The window closes whatever else is true. Tying that to the bookkeeping
         // is how a little window outlives the thing that opened it.
         if floater.showing { floater.drop() }
         guard let id = floating, let tab = tab(id) else { return }
         floating = nil
         tab.floating = false
-        tab.web.evaluateJavaScript(Isolate.off)
+        tab.web.evaluateJavaScript(Isolate.off(pausing: pausing))
     }
 
     private func prepare(_ tab: Tab) {

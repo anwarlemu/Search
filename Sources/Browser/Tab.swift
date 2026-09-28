@@ -74,7 +74,9 @@ enum Web {
         // the view) only lets Safari's Develop menu in; the item itself waits
         // on this older switch, which has no public name.
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
-        config.mediaTypesRequiringUserActionForPlayback = .audio
+        // A test run may let sound start on its own, so the bench can play a
+        // video the way a click would.
+        config.mediaTypesRequiringUserActionForPlayback = Store.testing && ProcessInfo.processInfo.environment["BROWSER_AUTOPLAY"] != nil ? [] : .audio
         // A page not on screen keeps running, slowly, rather than being
         // stopped. WebKit's own default suspends the process of a view that
         // is out of its window, and a page suspended for an hour comes back
