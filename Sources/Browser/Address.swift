@@ -12,6 +12,12 @@ enum Address {
 
     static func url(from typed: String) -> URL? {
         let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A path to a file on this Mac, spaces and all — dragged in from
+        // Finder or typed.
+        if text.hasPrefix("/") || text.hasPrefix("~/") {
+            let path = (text as NSString).expandingTildeInPath
+            return FileManager.default.fileExists(atPath: path) ? URL(fileURLWithPath: path) : nil
+        }
         guard !text.isEmpty, !text.contains(" ") else { return nil }
 
         // Written with a scheme, it is taken at its word.

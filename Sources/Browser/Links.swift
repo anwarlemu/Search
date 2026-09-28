@@ -68,7 +68,7 @@ final class Links: NSObject, NSApplicationDelegate {
 
     /// Files and anything else the system opens with the app.
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls where url.scheme?.lowercased().hasPrefix("http") == true {
+        for url in urls where url.isFileURL || url.scheme?.lowercased().hasPrefix("http") == true {
             Links.take(url)
         }
     }

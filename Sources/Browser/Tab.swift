@@ -669,7 +669,7 @@ final class Tab: ObservableObject, Identifiable {
         picture = nil
         cover = nil
         adoptIcon()
-        web.load(URLRequest(url: url))
+        web.visit(url)
     }
 
     /// Brought back from the last session: everything the row needs to draw it,
@@ -838,12 +838,12 @@ final class Tab: ObservableObject, Identifiable {
         if let state {
             view.interactionState = state
         } else {
-            view.load(URLRequest(url: url))
+            view.visit(url)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self else { return }
             guard built?.url?.absoluteString != "about:blank" else {
-                web.load(URLRequest(url: url))
+                web.visit(url)
                 return
             }
             web.evaluateJavaScript("document.readyState") { [weak self] _, error in
@@ -852,7 +852,7 @@ final class Tab: ObservableObject, Identifiable {
                     guard error.domain == WKErrorDomain,
                           error.code == WKError.webContentProcessTerminated.rawValue
                     else { return }
-                    self.web.load(URLRequest(url: url))
+                    self.web.visit(url)
                 }
             }
         }
@@ -873,7 +873,7 @@ final class Tab: ObservableObject, Identifiable {
         // A view with no document behind an address: whatever emptied it, the
         // address is what to show, and reload alone would have nothing to do.
         if hollow, let address {
-            web.load(URLRequest(url: address))
+            web.visit(address)
             return
         }
         web.evaluateJavaScript("document.readyState") { [weak self] _, error in
@@ -945,7 +945,7 @@ final class Tab: ObservableObject, Identifiable {
         // the reload.
         guard !wake() else { return }
         if hollow, let address {
-            web.load(URLRequest(url: address))
+            web.visit(address)
         } else {
             web.reload()
         }
@@ -1035,6 +1035,19 @@ final class AudioWatch: NSObject {
     }
 
     deinit { stop() }
+}
+
+extension WKWebView {
+    /// Goes to an address. A file on disk has to be opened as one — WebKit
+    /// refuses a plain request for it — with its own folder readable, so the
+    /// page's pictures and stylesheets beside it come too.
+    func visit(_ url: URL) {
+        if url.isFileURL {
+            loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        } else {
+            load(URLRequest(url: url))
+        }
+    }
 }
 
 /// A web view that reads the two-finger swipe for itself.
