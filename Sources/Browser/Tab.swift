@@ -994,6 +994,20 @@ final class Tab: ObservableObject, Identifiable {
         web.navigationDelegate = nil
         web.uiDelegate = nil
         web.removeFromSuperview()
+        // The page ends now, not whenever the last hold on it lets go — but
+        // only once its media has answered the pause, or half a second has
+        // passed. Closed first, the pause never arrived, and a closed tab's
+        // video played on for seconds from sound already queued (29 Sep 2026).
+        web.closeAllMediaPresentations()
+        var ended = false
+        let end = {
+            guard !ended else { return }
+            ended = true
+            let close = NSSelectorFromString("_close")
+            if web.responds(to: close) { web.perform(close) }
+        }
+        web.pauseAllMediaPlayback { end() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { end() }
     }
 }
 
