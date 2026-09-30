@@ -47,28 +47,6 @@ struct Page: View {
                     .transition(.opacity)
             }
 
-            if let link = tab.hovered, tab.floating == false {
-                // Where a click would go, in the corner, the way every
-                // browser has said it. Not in the way of anything: it takes
-                // no clicks, and stops short of half the page.
-                Text(link)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.ink.opacity(0.8))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(Palette.ground, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
-                    .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
-                    .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in width * 0.5 }
-                    .fixedSize(horizontal: true, vertical: false)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                    .padding(8)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-            }
-
             if let pull = tab.pull {
                 Disc(pull: pull)
                     // A disc for each edge, never one that changes edges: a
@@ -79,6 +57,33 @@ struct Page: View {
                     // longer is still arriving when a quick flick has already
                     // let go.
                     .transition(.opacity.combined(with: .scale(scale: 0.85)))
+            }
+        }
+        // Where a click would go, in the corner, the way every browser has
+        // said it. Laid over the page rather than in with it: sized in with
+        // it, a long enough address (Google's are) made the label wider than
+        // the window, the page grew with it, and its right side went off the
+        // edge (30 Sep 2026). Next to a clear space of equal claim, it takes
+        // what it needs up to half the width, and is cut in the middle past
+        // that.
+        .overlay(alignment: .bottomLeading) {
+            if let link = tab.hovered, tab.floating == false {
+                HStack(spacing: 0) {
+                    Text(link)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.ink.opacity(0.8))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Palette.ground, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
+                        .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+                    Color.clear.frame(height: 1)
+                }
+                .padding(8)
+                .allowsHitTesting(false)
+                .transition(.opacity)
             }
         }
         .animation(Motion.quick, value: tab.failure)
