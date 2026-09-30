@@ -924,10 +924,12 @@ final class Browser: NSObject, ObservableObject {
 
         // An icon that arrives is put on every tab showing that site, not only
         // the one that happened to ask for it.
-        Favicons.shared.arrived = { [weak self] host, image in
-            guard let self else { return }
-            for tab in tabs where tab.address?.host()?.lowercased() == host {
-                tab.icon = image
+        // Every window's, the private ones too, which have no say in this.
+        Favicons.shared.arrived = { host, image in
+            for browser in Browser.every.allObjects {
+                for tab in browser.tabs where tab.address?.host()?.lowercased() == host {
+                    tab.icon = image
+                }
             }
         }
         // The little window's own three buttons.
@@ -2176,6 +2178,14 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // A tab waking from sleep: the new document is in, and a moment
         // after it is on screen the picture of the old one can go.
         tab.uncover(after: 0.45)
+        // A page that goes on loading for a long while — a feed, a video
+        // site — would wear a letter until it was done. Asked two seconds in,
+        // once its head has been read.
+        let landed = tab.address
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak tab] in
+            guard let tab, tab.loading, tab.address == landed, tab.built != nil else { return }
+            Favicons.shared.fetch(for: tab)
+        }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

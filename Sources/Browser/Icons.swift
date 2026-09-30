@@ -19,10 +19,26 @@ final class Favicons {
 
     private var memory: [String: NSImage] = [:]
     private var busy: Set<String> = []
-    private var missing: Set<String> = []
+    /// Hosts that had no icon to give, and when: asked again after a while,
+    /// not never — one dropped connection used to leave a site a letter for
+    /// the rest of the session.
+    private var missing: [String: Date] = [:]
+    /// Where each kept icon came from. A site whose icon moves — Google
+    /// Calendar's shows today's date, Gmail's its unread count — declares a
+    /// new address, and that, not the age of the file, is what says the kept
+    /// one is out of date.
+    private var sources: [String: String] = [:]
 
     private static var folder: URL { Store.folder.appendingPathComponent("icons", isDirectory: true) }
     private static func file(_ key: String) -> URL { folder.appendingPathComponent(key + ".png") }
+    private static func source(_ key: String) -> URL { folder.appendingPathComponent(key + ".src") }
+
+    private func source(of key: String) -> String? {
+        if let known = sources[key] { return known }
+        let read = try? String(contentsOf: Favicons.source(key), encoding: .utf8)
+        sources[key] = read
+        return read
+    }
 
     /// Whether the chrome is dark right now. A site that declares an icon
     /// for `prefers-color-scheme: dark` is asked for that one, and it is
@@ -58,7 +74,7 @@ final class Favicons {
     /// The look changed: every tab puts on the icon that goes with it, and
     /// asks again for one where the site may have a variant not yet seen.
     func relook(_ tabs: [Tab]) {
-        missing = []
+        missing = [:]
         for tab in tabs {
             guard let host = tab.address?.host()?.lowercased() else { continue }
             tab.icon = cached(host)
@@ -75,22 +91,18 @@ final class Favicons {
         arrived?(host, image)
     }
 
-    /// Asks the page which icon it wants to be known by, fetches it, and keeps
-    /// it. Nothing happens if a fresh one is already on disk.
+    /// Asks the page which icon it wants to be known by, and fetches it only
+    /// when that is not the one already kept: asking is one line of script,
+    /// fetching is a request, and most pages change neither from one visit
+    /// to the next.
     func fetch(for tab: Tab) {
         guard let url = tab.address, let host = url.host()?.lowercased(),
               url.scheme?.hasPrefix("http") == true
         else { return }
-
         let dark = Favicons.dark
-        // Fresh and right for this look: nothing to do. In the dark, a fresh
-        // light icon is not enough on its own — the site may offer a dark
-        // one that has never been asked for — so the page is asked.
-        if Favicons.fresh(Favicons.key(host, dark: dark)), let known = known(Favicons.key(host, dark: dark)) {
-            tab.icon = known
-            return
-        }
-        guard !busy.contains(host), !missing.contains(host) else { return }
+        if let known = cached(host), tab.icon !== known { tab.icon = known }
+        guard !busy.contains(host) else { return }
+        if let since = missing[host], Date().timeIntervalSince(since) < 600 { return }
         busy.insert(host)
 
         tab.web.evaluateJavaScript(Favicons.probe) { [weak self, weak tab] answer, _ in
@@ -100,14 +112,15 @@ final class Favicons {
                 let offersDark = declared.contains { Favicons.media($0["media"]) == .dark }
                 let wantDark = dark && offersDark
                 let key = Favicons.key(host, dark: wantDark)
-                // No dark variant here after all, and the ordinary one is
-                // fresh: it is the one to wear.
-                if !wantDark, Favicons.fresh(key), let known = self.known(key) {
-                    tab?.icon = known
+                let candidates = Favicons.rank(declared, page: url, dark: wantDark)
+                // The same icon as last time, kept and not old: it is the one
+                // to wear, and nothing is fetched.
+                if let first = candidates.first, self.source(of: key) == first.absoluteString,
+                   Favicons.fresh(key), let known = self.known(key) {
+                    if tab?.icon !== known { tab?.icon = known }
                     self.busy.remove(host)
                     return
                 }
-                let candidates = Favicons.rank(declared, page: url, dark: wantDark)
                 let shy = tab?.shy ?? false
                 let jar = tab?.built?.configuration.websiteDataStore.httpCookieStore
                 Task { await self.download(candidates, host: host, key: key, shy: shy, jar: jar) }
@@ -155,13 +168,17 @@ final class Favicons {
             else { continue }
             guard let image = await Favicons.square(data) else { continue }
             memory[key] = image
-            if !shy { Favicons.keep(image, for: key) }
+            // Kept under the address the page first asked for, whichever
+            // candidate answered, so the next visit declaring the same one
+            // recognises it.
+            sources[key] = candidates.first?.absoluteString
+            if !shy { Favicons.keep(image, for: key, from: candidates.first) }
             arrived?(host, image)
             return
         }
-        // Not asked again this session: hammering a site for an icon it
-        // doesn't have is exactly the kind of thing a quiet browser doesn't do.
-        missing.insert(host)
+        // Not asked again for a while: hammering a site for an icon it doesn't
+        // have is exactly the kind of thing a quiet browser doesn't do.
+        missing[host] = Date()
     }
 
     /// Whether a browser would send this cookie to this address: its domain
@@ -202,7 +219,7 @@ final class Favicons {
         }.value
     }
 
-    private static func keep(_ image: NSImage, for key: String) {
+    private static func keep(_ image: NSImage, for key: String, from origin: URL? = nil) {
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:])
@@ -211,6 +228,7 @@ final class Favicons {
         DispatchQueue.global(qos: .utility).async {
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try? png.write(to: file, options: .atomic)
+            if let origin { try? origin.absoluteString.write(to: source(key), atomically: true, encoding: .utf8) }
         }
     }
 
