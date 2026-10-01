@@ -524,14 +524,21 @@ enum Isolate {
     /// hiding the body and turning it back on for the video alone leaves the
     /// player's own machinery running untouched — which is what keeps the
     /// stream alive where cutting the DOM about would kill it.
-    static let on = """
-    (function () {
+    ///
+    /// `choosy`, for a page that isn't a video site or a call: only a video
+    /// with its sound on, at least 200 points across, is worth following.
+    static func on(choosy: Bool) -> String {
+        "(function (choosy) {" + onBody + "})(\(choosy));"
+    }
+
+    private static let onBody = """
       var videos = document.querySelectorAll('video');
       var best = null, area = 0;
       for (var i = 0; i < videos.length; i++) {
         var v = videos[i];
         if (v.paused || v.ended || v.readyState < 2) continue;
         var box = v.getBoundingClientRect();
+        if (choosy && (v.muted || v.volume === 0 || box.width < 200 || box.height < 112)) continue;
         if (box.width * box.height >= area) { area = box.width * box.height; best = v; }
       }
       if (!best) return 'none';
@@ -605,7 +612,6 @@ enum Isolate {
       }, 250);
 
       return 'floating';
-    })();
     """
 
     /// Stop or start it, and say which it is now.

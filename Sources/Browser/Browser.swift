@@ -1568,13 +1568,18 @@ final class Browser: NSObject, ObservableObject {
         // A tab just put down with ⌘W has no page to lift a video out of, and
         // asking it would only build an empty view to ask.
         guard let tab, !tab.isBlank, !tab.asleep, !floater.showing else { return }
-        // On its own, only from a site whose video is the point of the site.
-        // A hero background on a studio's home page is a video too, and it
-        // followed people around the desktop. ⌘⇧P still lifts from anywhere.
-        if quietly, !Players.knows(tab.address) { return }
+        // On its own: from a site whose video is the point of the site, from a
+        // call — Meet, Zoom, Teams, anything using the camera or microphone —
+        // and elsewhere only for a video playing with its sound on and big
+        // enough to be watched. A hero background on a studio's home page is a
+        // video too, silent, and it followed people around the desktop. ⌘⇧P
+        // still lifts from anywhere.
+        let web = tab.web
+        let calling = web.cameraCaptureState != .none || web.microphoneCaptureState != .none
+        let choosy = quietly && !calling && !Players.knows(tab.address)
         // Isolated where it is, then moved: pinned only once it was in the
         // little window, the video drew nothing at all (25 Sep 2026).
-        tab.web.evaluateJavaScript(Isolate.on) { [weak self] answer, _ in
+        tab.web.evaluateJavaScript(Isolate.on(choosy: choosy)) { [weak self] answer, _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 guard (answer as? String) == "floating" else {
