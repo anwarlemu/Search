@@ -473,6 +473,9 @@ struct BookmarksPanel: View {
     @ObservedObject var browser: Browser
     @ObservedObject var bookmarks: Bookmarks
 
+    /// Found once as the panel opens, not on every draw of the tree.
+    @State private var sources: [Chromium.Source] = []
+
     var body: some View {
         Plate("Bookmarks", width: 600, close: { browser.bookmarking = false }) {
             if bookmarks.isEmpty {
@@ -496,7 +499,7 @@ struct BookmarksPanel: View {
                 Text("Bring in from")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
-                ForEach(Chromium.installed()) { source in
+                ForEach(sources) { source in
                     Pill(source.name) { browser.takeBookmarks(from: source) }
                 }
                 Spacer()
@@ -505,5 +508,6 @@ struct BookmarksPanel: View {
                     .foregroundStyle(Palette.muted)
             }
         }
+        .onAppear { Chromium.installed { sources = $0 } }
     }
 }

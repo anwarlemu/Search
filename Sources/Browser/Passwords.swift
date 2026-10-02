@@ -10,6 +10,10 @@ struct PasswordsPanel: View {
     @State private var open: String?
     @State private var adding = false
     @State private var importing: String?
+    /// The browsers on this Mac, found once as the panel opens. Asked in
+    /// the body, the walk through Application Support ran on every keystroke
+    /// in the search box (2 Oct 2026).
+    @State private var sources: [Chromium.Source] = []
 
     var body: some View {
         Plate("Passwords", width: 620, close: { browser.managing = false }) {
@@ -57,7 +61,7 @@ struct PasswordsPanel: View {
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
                     // Only the browsers actually on this Mac.
-                    ForEach(Chromium.installed()) { source in
+                    ForEach(sources) { source in
                         Pill(source.name) {
                             importing = source.name
                             // Off the main thread: four hundred passwords is a
@@ -94,7 +98,10 @@ struct PasswordsPanel: View {
         }
         .animation(Motion.settle, value: adding)
         .animation(Motion.settle, value: open)
-        .onAppear { hunting = true }
+        .onAppear {
+            hunting = true
+            Chromium.installed { sources = $0 }
+        }
     }
 
     /// A site, and under it its accounts once opened.
