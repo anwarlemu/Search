@@ -2389,12 +2389,22 @@ extension Browser: WKDownloadDelegate {
             panel.nameFieldStringValue = name
             panel.directoryURL = prefs.downloads
             panel.canCreateDirectories = true
-            guard panel.runModal() == .OK, let url = panel.url else {
-                completionHandler(nil)
-                return
+            let finish: (NSApplication.ModalResponse) -> Void = { [weak self] answer in
+                guard answer == .OK, let url = panel.url else {
+                    completionHandler(nil)
+                    return
+                }
+                completionHandler(url)
+                self?.announce("Downloading \(url.lastPathComponent)")
             }
-            completionHandler(url)
-            announce("Downloading \(url.lastPathComponent)")
+            // A sheet on the window the download came from, not a panel
+            // that stops every window of the app — the other window, and
+            // the little one, went dead until it was answered (2 Oct 2026).
+            if let home = download.webView.flatMap(Dialogs.window(for:)) ?? window {
+                panel.beginSheetModal(for: home, completionHandler: finish)
+            } else {
+                finish(panel.runModal())
+            }
             return
         }
 
