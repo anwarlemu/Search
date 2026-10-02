@@ -337,6 +337,30 @@ final class Tab: ObservableObject, Identifiable {
     /// never let go of (2 Oct 2026).
     var listeners = Set<AnyCancellable>()
 
+    /// What a page asked — alert, confirm, prompt — while nobody was
+    /// looking at its tab, held until somebody is. Shown at once, the
+    /// question stood over whatever tab was on screen, as if that page had
+    /// asked it (2 Oct 2026). Each comes with the way to answer it unasked,
+    /// for a page that goes before its tab is looked at again.
+    private var questions: [(show: () -> Void, dismiss: () -> Void)] = []
+
+    func ask(_ show: @escaping () -> Void, orDismiss dismiss: @escaping () -> Void) {
+        questions.append((show, dismiss))
+    }
+
+    /// The tab is on screen: whatever its page asked meanwhile, asked now.
+    func askNow() {
+        let held = questions
+        questions = []
+        held.forEach { $0.show() }
+    }
+
+    private func dismissQuestions() {
+        let held = questions
+        questions = []
+        held.forEach { $0.dismiss() }
+    }
+
     /// A tab that has never been anywhere shows the address field instead of a
     /// page. It still owns a web view — built now, warm by the time it's needed.
     var isBlank: Bool { address == nil }
@@ -1028,6 +1052,9 @@ final class Tab: ObservableObject, Identifiable {
     /// back-forward cache. The tab keeps its address; `web` builds again the
     /// next time anyone asks for it.
     private func discard() {
+        // The page is going; a question of its own that was never put is
+        // answered the way an unanswered one is, so nothing waits on it.
+        dismissQuestions()
         watch = []
         ears.stop()
         guard let web = built else { return }

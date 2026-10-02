@@ -1321,6 +1321,12 @@ final class Browser: NSObject, ObservableObject {
         rememberSession()
         editing = false
         typed = ""
+        // Whatever its page asked while you were elsewhere — a turn later,
+        // once the stage has the view, so the sheet hangs off its window.
+        DispatchQueue.main.async { [weak self, weak tab] in
+            guard let self, let tab, tab.id == activeID else { return }
+            tab.askNow()
+        }
     }
 
     /// ⌘W, or the cross on the tab. Closing the last one leaves a blank tab
