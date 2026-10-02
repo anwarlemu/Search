@@ -1029,7 +1029,9 @@ private struct ExtensionButtons: View {
 
         var body: some View {
             SwiftUI.Button(action: press) {
-                ExtensionIcon(button: button, size: 15)
+                // The size it was rasterized at (see buttons): drawn a point
+                // smaller, every icon was resampled (2 Oct 2026).
+                ExtensionIcon(button: button, size: 16)
                     .frame(width: 26, height: 26)
                     .background(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
