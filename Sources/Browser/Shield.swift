@@ -80,6 +80,8 @@ final class Shield: ObservableObject {
         "mixpanel.com", "amplitude.com", "segment.com", "segment.io",
         "branch.io", "appsflyer.com", "adjust.com", "analytics.tiktok.com",
         "connect.facebook.net", "ads-twitter.com", "analytics.twitter.com",
+        "bat.bing.com", "demdex.net", "bluekai.com", "rlcdn.com", "adsafeprotected.com",
+        "media.net", "ads.linkedin.com", "ct.pinterest.com", "sc-static.net",
     ]
 
     /// The few slots that are reliably an advertisement and nothing else. Kept
