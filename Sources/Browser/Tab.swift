@@ -825,7 +825,11 @@ final class Tab: ObservableObject, Identifiable {
         // SwiftUI actually putting the view on screen. Bounded at about a
         // second, so a wake with no stage waiting for it still loads rather
         // than hanging on one that will never come.
-        let view = web
+        // Only the first pass may build the view. Every later one — the
+        // waits below — finds the view that was there or gives up: a tab
+        // closed or put down in the meantime has none, and asking `web`
+        // built a fresh one, process and all, for nobody (2 Oct 2026).
+        guard let view = tries == 0 ? web : built, pending == nil else { return }
         if view.window == nil, tries < 50 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
                 self?.loadAndVerify(url, state: state, tries: tries + 1)
@@ -841,18 +845,20 @@ final class Tab: ObservableObject, Identifiable {
             view.visit(url)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self else { return }
-            guard built?.url?.absoluteString != "about:blank" else {
-                web.visit(url)
+            guard let self, let view = built, pending == nil else { return }
+            guard view.url?.absoluteString != "about:blank" else {
+                view.visit(url)
                 return
             }
-            web.evaluateJavaScript("document.readyState") { [weak self] _, error in
+            view.evaluateJavaScript("document.readyState") { [weak self] _, error in
                 MainActor.assumeIsolated {
-                    guard let self, let error = error as NSError? else { return }
+                    guard let self, let view = self.built, self.pending == nil,
+                          let error = error as NSError?
+                    else { return }
                     guard error.domain == WKErrorDomain,
                           error.code == WKError.webContentProcessTerminated.rawValue
                     else { return }
-                    self.web.visit(url)
+                    view.visit(url)
                 }
             }
         }
