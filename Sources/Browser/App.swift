@@ -347,10 +347,6 @@ struct ContentView: View {
     @State private var keys: Any?
     @State private var window: NSWindow?
     @State private var resting: RestingLights?
-    /// Whether the pointer is in the lights' corner, with the column put away.
-    @State private var corner = false
-    /// Whether the three buttons are out of sight — see showLights.
-    @State private var lightsHidden = false
 
 
     /// The window: room at the top, one stage for the page, and the row when
@@ -417,10 +413,6 @@ struct ContentView: View {
                 DragStrip()
                     .frame(width: Metrics.lights, height: Metrics.strip)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .onHover { over in
-                        corner = over
-                        showLights(over || browser.peeking)
-                    }
                 HStack(spacing: 0) {
                     Color.clear
                         .frame(width: 6)
@@ -544,8 +536,6 @@ struct ContentView: View {
             .onChange(of: browser.prefs.sidebar) { _, _ in
                 DispatchQueue.main.async { measureLights() }
             }
-            .onChange(of: tucked) { _, now in showLights(!now || corner || browser.peeking) }
-            .onChange(of: browser.peeking) { _, now in if tucked { showLights(now || corner) } }
             // Stepping away to another app: macOS draws its own resting
             // buttons, and on a light window they come out nearly white. Ours
             // go on in their place until the app comes back.
@@ -553,7 +543,7 @@ struct ContentView: View {
                 // Another app in front: the pointer is no longer over the page.
                 browser.active?.built?.pointerLeft()
                 measureLights()
-                resting?.isHidden = lightsHidden
+                resting?.isHidden = false
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 resting?.isHidden = true
@@ -777,23 +767,7 @@ struct ContentView: View {
         view.spots = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
             .compactMap { window.standardWindowButton($0) }
             .map { $0.convert($0.bounds, to: titlebar) }
-        view.isHidden = NSApp.isActive || lightsHidden
-    }
-
-    /// With the column put away the page has the whole window, and the
-    /// three buttons sat over whatever a site drew in its corner — a logo,
-    /// as often as not (2 Oct 2026). So they go, and come back while the
-    /// pointer is in their corner or the column is peeking out.
-    private func showLights(_ on: Bool) {
-        guard let window else { return }
-        lightsHidden = !on
-        resting?.isHidden = NSApp.isActive || !on
-        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
-            .compactMap { window.standardWindowButton($0) }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
-            for button in buttons { button.animator().alphaValue = on ? 1 : 0 }
-        }
+        view.isHidden = NSApp.isActive
     }
 
     private func dress(_ window: NSWindow) {
@@ -837,10 +811,7 @@ struct ContentView: View {
         // Lights.swift. The column's first row is the strip's height too, so
         // its three doors sit on the lights' line.
         Lights.keep(window) { measureLights() }
-        DispatchQueue.main.async {
-            measureLights()
-            if tucked { showLights(false) }
-        }
+        DispatchQueue.main.async { measureLights() }
 
         // The traffic lights are drawn — measured, they paint themselves — but
         // the window shows white where they are. The content view fills the
