@@ -128,7 +128,9 @@ final class Tab: ObservableObject, Identifiable {
     private weak var armedFor: PageView?
 
     @Published private(set) var title = ""
-    @Published private(set) var address: URL?
+    @Published private(set) var address: URL? {
+        didSet { restage() }
+    }
     @Published private(set) var progress: Double = 0
     @Published private(set) var loading = false
     @Published private(set) var canGoBack = false
@@ -186,7 +188,9 @@ final class Tab: ObservableObject, Identifiable {
     @Published var immersed = false
 
     /// True while this tab's page is out in the little window.
-    @Published var floating = false
+    @Published var floating = false {
+        didSet { restage() }
+    }
 
     /// A sideways swipe in progress, for the disc that shows it.
     @Published var pull: Pull?
@@ -297,7 +301,24 @@ final class Tab: ObservableObject, Identifiable {
     /// has a name and an address in the row, and costs nothing until you go to
     /// it — which is the difference between a browser that starts in half a
     /// second with twenty tabs and one that doesn't.
-    private(set) var pending: URL?
+    private(set) var pending: URL? {
+        didSet { restage() }
+    }
+
+    /// Whether the stage is to hold this tab's page, said again only when
+    /// that changes: not for a blank tab, not for one asleep, not while the
+    /// page is out in the little window. The stage used to watch the whole
+    /// tab, and every tick of progress, every scroll and every key typed
+    /// into the page re-ran it (2 Oct 2026). See Stage.swift.
+    final class Staging: ObservableObject {
+        @Published fileprivate(set) var wanted = false
+    }
+    let stage = Staging()
+
+    private func restage() {
+        let now = !isBlank && !asleep && !floating
+        if stage.wanted != now { stage.wanted = now }
+    }
 
     /// For a tab put to sleep for not being looked at: the page's own history
     /// — the back list, the page, where it was scrolled to — handed to the
@@ -675,9 +696,11 @@ final class Tab: ObservableObject, Identifiable {
     /// Brought back from the last session: everything the row needs to draw it,
     /// and nothing fetched.
     func restore(url: URL, title: String) {
+        // Asleep before it has an address, so the stage is never told,
+        // even for a moment, that there is a page to want.
+        pending = url
         address = url
         self.title = title
-        pending = url
         adoptIcon()
     }
 

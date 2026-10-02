@@ -9,19 +9,45 @@ import WebKit
 /// hands down — SwiftUI sees the same reference, re-runs nothing, and the page
 /// arrives in WebKit without ever being put on screen. Watching it here is
 /// what turns that into a redraw.
+///
+/// In two parts, because they change at different rates: the stage holds
+/// one view and changes when that view does; everything drawn over it
+/// follows the tab moment by moment. One view watching the whole tab
+/// re-ran the stage for every tick of progress and every scroll (2 Oct 2026).
 struct Page: View {
+    let tab: Tab
+
+    var body: some View {
+        ZStack {
+            Stage(tab: tab, stage: tab.stage)
+            Overlays(tab: tab)
+        }
+    }
+}
+
+/// The page itself, and only that. Told by the tab whether to hold it —
+/// not for a tab put down with ⌘W, which has no view, and asking for one
+/// here would build an empty one a frame before the stage moves on; not
+/// while the page is out in the little window: handed over anyway, the
+/// stage took it back on its next layout — a resize was enough — and the
+/// little window, finding its page gone, closed itself (2 Oct 2026).
+private struct Stage: View {
+    let tab: Tab
+    @ObservedObject var stage: Tab.Staging
+
+    var body: some View {
+        WebStage(page: stage.wanted ? tab.web : nil)
+    }
+}
+
+/// What is drawn over the page: the picture of a tab waking, the word that
+/// its page is elsewhere, the sentence that it never came, the disc of a
+/// swipe, and the link under the pointer.
+private struct Overlays: View {
     @ObservedObject var tab: Tab
 
     var body: some View {
         ZStack {
-            // A tab put down with ⌘W has no view, and asking for one here
-            // would build an empty one a frame before the stage moves on.
-            // Nor is the page wanted while it is out in the little window:
-            // handed over anyway, the stage took it back on its next layout
-            // — a resize was enough — and the little window, finding its
-            // page gone, closed itself (2 Oct 2026).
-            WebStage(page: tab.isBlank || tab.asleep || tab.floating ? nil : tab.web)
-
             if let cover = tab.cover {
                 // The page as it was left, while it is rebuilt underneath —
                 // anchored where the page itself starts, and never in the
@@ -63,6 +89,9 @@ struct Page: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.85)))
             }
         }
+        // As big as the stage under it, so the corner below is the stage's
+        // corner — with nothing to draw it would otherwise be no size at all.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Where a click would go, in the corner, the way every browser has
         // said it. Laid over the page rather than in with it: sized in with
         // it, a long enough address (Google's are) made the label wider than
