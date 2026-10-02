@@ -24,23 +24,26 @@ import CryptoKit
 @MainActor
 enum ExtensionShims {
     /// The name native messages to the browser itself go to.
-    static let application = "search"
-    static let file = "search-shim.js"
+    nonisolated static let application = "search"
+    nonisolated static let file = "search-shim.js"
     /// The first line of a worker that already carries the shim.
-    static let marker = "/* Search: Chrome APIs WebKit lacks, filled in (ExtensionShims.swift) */"
-    static let ender = "/* Search: end of shim */"
+    nonisolated static let marker = "/* Search: Chrome APIs WebKit lacks, filled in (ExtensionShims.swift) */"
+    nonisolated static let ender = "/* Search: end of shim */"
 
     // MARK: - at install
 
     /// Written beside a prepared extension: which shim it carries. The same
     /// one needs nothing redone, which matters at launch — preparing reads
     /// every script and page an extension ships.
-    static let stamp = ".search-shim"
-    static let version: String = {
+    nonisolated static let stamp = ".search-shim"
+    nonisolated static let version: String = {
         SHA256.hash(data: Data(script.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() + (Store.testing ? "-test" : "")
     }()
 
-    static func prepare(_ folder: URL) throws {
+    /// Off the main actor: it reads and rewrites every script and page an
+    /// extension ships, and is run from a background task at install and
+    /// update (2 Oct 2026).
+    nonisolated static func prepare(_ folder: URL) throws {
         let files = FileManager.default
         let stampURL = folder.appendingPathComponent(stamp)
         if (try? String(contentsOf: stampURL, encoding: .utf8)) == version { return }
@@ -51,6 +54,7 @@ enum ExtensionShims {
 
         let script = shim(for: folder)
         try script.write(to: folder.appendingPathComponent(file), atomically: true, encoding: .utf8)
+        try contentScript.write(to: folder.appendingPathComponent(contentFile), atomically: true, encoding: .utf8)
 
         // Native messaging is how the shim reaches the browser; user scripts
         // are carried out through WebKit's registered content scripts, which
@@ -99,12 +103,13 @@ enum ExtensionShims {
             manifest["background"] = background
         }
 
-        // Content scripts too — there only the sendMessage mend applies.
+        // Content scripts get the small one — in place of the whole shim an
+        // earlier Search put there.
         if let entries = manifest["content_scripts"] as? [[String: Any]] {
             manifest["content_scripts"] = entries.map { entry -> [String: Any] in
                 var entry = entry
-                if var js = entry["js"] as? [String], js.first != file {
-                    js.insert(file, at: 0)
+                if var js = entry["js"] as? [String] {
+                    if js.first == file { js[0] = contentFile } else if js.first != contentFile { js.insert(contentFile, at: 0) }
                     entry["js"] = js
                 }
                 return entry
@@ -134,12 +139,12 @@ enum ExtensionShims {
     /// The shim as this extension gets it: with the events its code mentions
     /// — `chrome.tabs.onUpdated`, `e.runtime.onInstalled` — so its worker
     /// can take their listeners late (see the end of the script).
-    static func shim(for folder: URL) -> String {
+    nonisolated static func shim(for folder: URL) -> String {
         var found = Set<String>()
         let pattern = try! NSRegularExpression(pattern: #"\.([a-zA-Z]+)\.(on[A-Z][A-Za-z]+)\b"#)
         let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: nil)
         while let url = walker?.nextObject() as? URL {
-            guard url.pathExtension == "js", url.lastPathComponent != file,
+            guard url.pathExtension == "js", url.lastPathComponent != file, url.lastPathComponent != contentFile,
                   var text = try? String(contentsOf: url, encoding: .utf8) else { continue }
             // Not the shim's own words, in a worker that already carries it.
             if text.hasPrefix(marker), let end = text.range(of: ender) { text = String(text[end.upperBound...]) }
@@ -170,7 +175,17 @@ enum ExtensionShims {
 
     /// Defines only what is missing, so the day WebKit implements an API,
     /// WebKit's is the one used.
-    static let script = #"""
+    nonisolated static let script = prologue + "\n" + rest
+
+    /// A content script's shim: the prologue alone. On a web page only the
+    /// accessor and the kept wrappers below apply (see inContent in it);
+    /// the whole sixteen hundred lines were put at the front of every
+    /// content script on every page before (2 Oct 2026).
+    nonisolated static let contentScript = prologue + "\n})();\n"
+    nonisolated static let contentFile = "search-content-shim.js"
+
+    /// What every script gets, content scripts included.
+    nonisolated static let prologue = #"""
     (() => {
       const root = globalThis;
       // Taken now, not looked up at each use: a sandbox that later locks
@@ -237,6 +252,10 @@ enum ExtensionShims {
         }
         for (const sub of ["local", "sync", "session", "managed"]) { try { if (ns[sub] && typeof ns[sub] === "object") kept.add(ns[sub]); } catch (e) {} }
       }
+    """#
+
+    /// The rest: for the extension's own pages and its worker.
+    nonisolated static let rest = #"""
       const withLastError = (error, callback) => {
         put(runtime, "lastError", { message: String(error && error.message || error) });
         try { callback(); } finally { try { delete runtime.lastError; } catch (e) {} }
@@ -527,7 +546,7 @@ enum ExtensionShims {
       if (chrome.idle && !chrome.idle.onStateChanged) {
         // Asked every so often while anyone listens, the way Chrome
         // notices on its own.
-        const changed = event(), add = changed.addListener;
+        const changed = event(), add = changed.addListener, remove = changed.removeListener;
         let every = 60, state = "active", timer = null;
         changed.addListener = (f) => {
           add(f);
@@ -537,6 +556,12 @@ enum ExtensionShims {
             state = now;
             for (const g of changed.listeners) try { g(now); } catch (e) { setTimeout(() => { throw e; }); }
           }).catch(() => {}), 15000);
+        };
+        // And stopped once nobody listens: it went on asking the browser
+        // every fifteen seconds for good (2 Oct 2026).
+        changed.removeListener = (f) => {
+          remove(f);
+          if (timer && !changed.listeners.size) { clearInterval(timer); timer = null; }
         };
         put(chrome.idle, "onStateChanged", changed);
         put(chrome.idle, "setDetectionInterval", (seconds) => { every = Math.max(15, Number(seconds) || 60); });
@@ -1804,6 +1829,19 @@ enum ExtensionShims {
     /// One voice for every extension that reads aloud.
     static let speaker = NSSpeechSynthesizer()
 
+    /// Everything kept here for an extension while it ran, let go as it
+    /// unloads: its offscreen page (a web view, and a process, that outlived
+    /// it), the sleep it held off, the popups and panel it set. A reload
+    /// starts it clean, as Chrome does (2 Oct 2026).
+    static func forget(_ id: String) {
+        offscreen[id] = nil
+        if let held = awake.removeValue(forKey: id) { IOPMAssertionRelease(held) }
+        popups[id] = nil
+        panelPath[id] = nil
+        panelOnClick.remove(id)
+        if ExtensionPopup.shared.extensionID == id { ExtensionPopup.shared.close() }
+    }
+
     static func answer(_ message: Any, from context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
         guard let body = message as? [String: Any], let api = body["api"] as? String else {
             return ["error": "Not a Browser message"]
@@ -2178,8 +2216,7 @@ enum ExtensionShims {
             // Those Chrome grants without a word, having nothing to warn of.
             let silent: Set<String> = ["tabGroups", "sidePanel", "offscreen", "idle", "power", "fontSettings", "search",
                                        "system.cpu", "system.memory", "system.display", "favicon"]
-            let names = wanted.map { $0.replacingOccurrences(of: ".", with: " ") }.joined(separator: ", ")
-            let yes = wanted.allSatisfy(silent.contains) ? true : await owner.ask(more: names, context: context)
+            let yes = wanted.allSatisfy(silent.contains) ? true : await owner.ask(more: wanted.filter { !silent.contains($0) }, context: context)
             guard yes else { return false }
             let had = Store.settings.stringArray(forKey: "extensions.granted.\(id)") ?? []
             Store.settings.set(Array(Set(had + wanted)).sorted(), forKey: "extensions.granted.\(id)")
@@ -2398,6 +2435,12 @@ enum ExtensionShims {
 
     /// Popups extensions set for their buttons: per tab, or "*" for all.
     static var popups: [String: [String: String]] = [:]
+
+    /// A closed tab's go with it; they were kept for good (2 Oct 2026).
+    static func forgetPopups(in tab: Tab.ID) {
+        let key = tab.uuidString
+        for id in popups.keys where popups[id]?[key] != nil { popups[id]?[key] = nil }
+    }
 
     /// Keep-awake assertions, one per extension that asked.
     static var awake: [String: IOPMAssertionID] = [:]

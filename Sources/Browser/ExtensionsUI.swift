@@ -97,12 +97,44 @@ struct ExtensionsPage: View {
         let item: Installed
         @ObservedObject var extensions: Extensions
         @State private var hovering = false
+        @State private var showingProblems = false
 
         var body: some View {
             let context = extensions.contexts[item.id]
+            let problems = self.problems(context)
+            VStack(alignment: .leading, spacing: 0) {
+                row(context, problems: problems)
+                // Each one in full, under the row, when asked — a count
+                // alone said nothing about what went wrong (2 Oct 2026).
+                if showingProblems, !problems.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(problems.enumerated()), id: \.offset) { _, text in
+                            Text(text)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Palette.muted)
+                                .lineLimit(4)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.leading, 48)
+                    .padding(.trailing, 14)
+                    .padding(.bottom, 10)
+                }
+            }
+            .background(hovering ? Palette.hover : .clear)
+            .onHover { hovering = $0 }
+        }
+
+        /// What WebKit holds against it, then what it reported itself.
+        private func problems(_ context: WKWebExtensionContext?) -> [String] {
+            (context?.errors ?? []).map(\.localizedDescription) + (extensions.errors[item.id] ?? [])
+        }
+
+        private func row(_ context: WKWebExtensionContext?, problems: [String]) -> some View {
             HStack(spacing: 12) {
                 Group {
-                    if let icon = context?.webExtension.icon(for: CGSize(width: 32, height: 32)) {
+                    if let icon = extensions.icon(for: item.id, size: 32) {
                         Image(nsImage: icon).resizable().interpolation(.high)
                     } else {
                         Image(systemName: "puzzlepiece.extension").foregroundStyle(Palette.muted)
@@ -114,11 +146,24 @@ struct ExtensionsPage: View {
                         .font(.system(size: 13))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
-                    Text(detail(context))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Palette.muted)
-                        .lineLimit(1)
-                        .help(item.source ?? "")
+                    HStack(spacing: 6) {
+                        Text(detail(context))
+                            .lineLimit(1)
+                            .help(item.source ?? "")
+                        if !problems.isEmpty {
+                            Button { showingProblems.toggle() } label: {
+                                HStack(spacing: 3) {
+                                    Text("· \(problems.count) warning\(problems.count == 1 ? "" : "s")")
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 8, weight: .semibold))
+                                        .rotationEffect(showingProblems ? .degrees(90) : .zero)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.muted)
                 }
                 Spacer(minLength: 8)
                 if hovering {
@@ -135,14 +180,12 @@ struct ExtensionsPage: View {
                     if context?.optionsPageURL != nil {
                         Quick("Options") { extensions.openOptions(item.id) }
                     }
-                    Quick("Remove", tint: .red.opacity(0.75)) { extensions.remove(item.id) }
+                    Quick("Remove…", tint: .red.opacity(0.75)) { extensions.confirmRemove(item.id) }
                 }
                 Switch(on: Binding(get: { item.enabled }, set: { extensions.setEnabled(item.id, $0) }))
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(hovering ? Palette.hover : .clear)
-            .onHover { hovering = $0 }
         }
 
         /// Where it was loaded from, by the folder's name — the whole path
@@ -157,7 +200,6 @@ struct ExtensionsPage: View {
             if context?.overrideNewTabPageURL != nil, Store.settings.object(forKey: "extensions.newtab.\(item.id)") as? Bool == true {
                 parts.append("shows in new tabs")
             }
-            if let errors = context?.errors, !errors.isEmpty { parts.append("\(errors.count) warning\(errors.count == 1 ? "" : "s")") }
             return parts.joined(separator: " · ")
         }
     }

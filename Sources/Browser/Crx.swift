@@ -39,8 +39,12 @@ enum Crx {
 
     /// Thirty-two letters from a to p, wherever they are — a bare id, a store
     /// link, an old chrome.google.com/webstore link.
+    /// Compiled once: this is asked from Settings' body on every keystroke
+    /// in the field, and from the store bar on every pass (2 Oct 2026).
+    private static let idPattern = try! NSRegularExpression(pattern: "(?<![a-z])([a-p]{32})(?![a-z])")
+
     static func id(in text: String) -> String? {
-        let pattern = try! NSRegularExpression(pattern: "(?<![a-z])([a-p]{32})(?![a-z])")
+        let pattern = idPattern
         let range = NSRange(text.startIndex..., in: text)
         guard let match = pattern.firstMatch(in: text.lowercased(), range: range),
               let found = Range(match.range(at: 1), in: text)
@@ -73,14 +77,18 @@ enum Crx {
     /// The zip inside a CRX3, once its signature has been checked against
     /// `id`.
     static func verifiedZip(_ crx: Data, id: String) throws -> Data {
-        let bytes = [UInt8](crx)
-        guard bytes.count > 12, Array(bytes[0..<4]) == Array("Cr24".utf8) else { throw Refused.notCrx }
-        let version = le32(bytes, 4)
+        // Read where it lies: the zip is a slice of the download, and the
+        // signed message is hashed over it in place. Three copies of a
+        // large extension were made here before, on the main thread (2 Oct
+        // 2026).
+        guard crx.count > 12, crx.prefix(4).elementsEqual("Cr24".utf8) else { throw Refused.notCrx }
+        let version = le32(crx, 4)
         guard version == 3 else { throw Refused.notCrx }
-        let headerSize = Int(le32(bytes, 8))
-        guard 12 + headerSize <= bytes.count else { throw Refused.notCrx }
-        let header = Array(bytes[12..<(12 + headerSize)])
-        let zip = Data(bytes[(12 + headerSize)...])
+        let headerSize = Int(le32(crx, 8))
+        guard 12 + headerSize <= crx.count else { throw Refused.notCrx }
+        let start = crx.startIndex
+        let header = Array(crx[(start + 12)..<(start + 12 + headerSize)])
+        let zip = crx[(start + 12 + headerSize)...]
 
         // CrxFileHeader: 2 = sha256_with_rsa proofs, 3 = sha256_with_ecdsa
         // proofs, 10000 = signed_header_data (SignedData: 1 = crx_id).
@@ -90,13 +98,16 @@ enum Crx {
               letters(crxID) == id
         else { throw Refused.unsignedOrWrong }
 
-        // What is signed: a fixed prefix, the signed header, and the zip.
-        var message = Data("CRX3 SignedData".utf8)
-        message.append(0)
+        // What is signed: a fixed prefix, the signed header, and the zip —
+        // as its SHA-256, which is what the signature is over anyway.
+        var hasher = SHA256()
+        hasher.update(data: Data("CRX3 SignedData".utf8))
+        hasher.update(data: Data([0]))
         var length = UInt32(signedHeader.count).littleEndian
-        message.append(Data(bytes: &length, count: 4))
-        message.append(Data(signedHeader))
-        message.append(zip)
+        hasher.update(data: Data(bytes: &length, count: 4))
+        hasher.update(data: Data(signedHeader))
+        hasher.update(data: zip)
+        let digest = Data(hasher.finalize())
 
         // One RSA proof, whose key is the one the id is made from, and whose
         // signature holds over the message. The store adds a proof of its
@@ -107,7 +118,7 @@ enum Crx {
                   let signature = proof.first(where: { $0.0 == 2 })?.1,
                   letters(Array(SHA256.hash(data: Data(key)).prefix(16))) == id
             else { return false }
-            return verify(rsaSPKI: Data(key), signature: Data(signature), message: message)
+            return verify(rsaSPKI: Data(key), signature: Data(signature), digest: digest)
         }
         guard owns else { throw Refused.unsignedOrWrong }
         return zip
@@ -137,8 +148,9 @@ enum Crx {
 
     // MARK: - pieces
 
-    private static func le32(_ b: [UInt8], _ at: Int) -> UInt32 {
-        UInt32(b[at]) | UInt32(b[at + 1]) << 8 | UInt32(b[at + 2]) << 16 | UInt32(b[at + 3]) << 24
+    private static func le32(_ b: Data, _ at: Int) -> UInt32 {
+        let i = b.startIndex + at
+        return UInt32(b[i]) | UInt32(b[i + 1]) << 8 | UInt32(b[i + 2]) << 16 | UInt32(b[i + 3]) << 24
     }
 
     /// The id's letters: each half-byte is a letter from a (0) to p (15).
@@ -179,8 +191,9 @@ enum Crx {
     }
 
     /// An RSA public key as Chrome writes it (SubjectPublicKeyInfo DER),
-    /// checked against a PKCS#1 v1.5 SHA-256 signature.
-    private static func verify(rsaSPKI: Data, signature: Data, message: Data) -> Bool {
+    /// checked against a PKCS#1 v1.5 SHA-256 signature, given the message's
+    /// digest.
+    private static func verify(rsaSPKI: Data, signature: Data, digest: Data) -> Bool {
         var format = SecExternalFormat.formatOpenSSL
         var type = SecExternalItemType.itemTypePublicKey
         var items: CFArray?
@@ -188,8 +201,8 @@ enum Crx {
               let key = (items as? [Any])?.first
         else { return false }
         return SecKeyVerifySignature(
-            key as! SecKey, .rsaSignatureMessagePKCS1v15SHA256,
-            message as CFData, signature as CFData, nil
+            key as! SecKey, .rsaSignatureDigestPKCS1v15SHA256,
+            digest as CFData, signature as CFData, nil
         )
     }
 }
