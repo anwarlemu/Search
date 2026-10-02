@@ -43,12 +43,18 @@ final class Extensions: NSObject, ObservableObject {
     static let shared = Extensions()
 
     /// Every page view built for a tab is handed the controller at birth —
-    /// it can't be given one later.
+    /// it can't be given one later. None while there is no controller.
     static func attach(_ configuration: WKWebViewConfiguration) {
-        configuration.webExtensionController = shared.controller
+        guard let controller = shared.made else { return }
+        configuration.webExtensionController = controller
     }
 
-    let controller: WKWebExtensionController
+    /// Made on the first need — a launch with something installed, a first
+    /// install — not at every launch: a browser with no extensions had a
+    /// controller, a scheme registered, and an adapter and four watchers
+    /// per tab, for nothing (2 Oct 2026).
+    private var made: WKWebExtensionController?
+    var controller: WKWebExtensionController { made ?? begin() }
     @Published private(set) var installed: [Installed] = []
     /// The loaded ones, by id.
     @Published private(set) var contexts: [String: WKWebExtensionContext] = [:]
@@ -94,6 +100,14 @@ final class Extensions: NSObject, ObservableObject {
     static func folder(for id: String) -> URL { folder.appendingPathComponent(id, isDirectory: true) }
 
     private override init() {
+        super.init()
+        installed = (try? JSONDecoder().decode([Installed].self, from: Data(contentsOf: Extensions.list))) ?? []
+    }
+
+    /// The controller, and the row followed for it from now on.
+    @discardableResult
+    private func begin() -> WKWebExtensionController {
+        if let made { return made }
         WKWebExtension.MatchPattern.registerCustomURLScheme(Extensions.scheme)
         // A test run keeps its extensions' storage apart, as it does its
         // cookies and passwords.
@@ -118,27 +132,29 @@ final class Extensions: NSObject, ObservableObject {
         // worker stop arriving. Not what anyone is testing.
         if Store.testing, !Store.measuring { views.preferences.inactiveSchedulingPolicy = .none }
         configuration.webViewConfiguration = views
-        controller = WKWebExtensionController(configuration: configuration)
-        super.init()
+        let controller = WKWebExtensionController(configuration: configuration)
         controller.delegate = self
-        installed = (try? JSONDecoder().decode([Installed].self, from: Data(contentsOf: Extensions.list))) ?? []
+        made = controller
+        controller.didOpenWindow(window)
+        guard let browser else { return controller }
+        watch(browser)
+        // Pages already built were made without it (Tab.swift) and can't
+        // be given it. The ones not in front are put to sleep, to come
+        // back with it when next looked at; the one in front keeps its
+        // page until it is next rebuilt.
+        for tab in browser.tabs where tab.built != nil && tab.id != browser.activeID { browser.sleep(tab) }
+        return controller
     }
 
     // MARK: - starting
 
     func start(for browser: Browser) {
         self.browser = browser
-        controller.didOpenWindow(window)
-        browser.$tabs
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] tabs in self?.follow(tabs) }
-            .store(in: &bag)
-        browser.$activeID
-            .removeDuplicates()
-            .scan((nil, nil)) { ($0.1, $1) }
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] pair in self?.activated(from: pair.0, to: pair.1) }
-            .store(in: &bag)
+        if made != nil { watch(browser) }
+        guard !installed.isEmpty else { return }
+        // Now, not when the first one loads: the first tab's page is built
+        // as the window draws, before that, and has to be given it then.
+        if installed.contains(where: \.enabled) { begin() }
         Task {
             // One after another, a moment apart: started all at once, WebKit
             // fails some of their workers and never tries them again.
@@ -153,6 +169,22 @@ final class Extensions: NSObject, ObservableObject {
     }
 
     // MARK: - the row, as WebKit sees it
+
+    /// The row and the tab in front, reported to the controller as they
+    /// change — only once there is one to tell.
+    private func watch(_ browser: Browser) {
+        guard bag.isEmpty else { return }
+        browser.$tabs
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] tabs in self?.follow(tabs) }
+            .store(in: &bag)
+        browser.$activeID
+            .removeDuplicates()
+            .scan((nil, nil)) { ($0.1, $1) }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] pair in self?.activated(from: pair.0, to: pair.1) }
+            .store(in: &bag)
+    }
 
     func adapter(for tab: Tab) -> ExtensionTab {
         if let known = adapters[tab.id] { return known }
