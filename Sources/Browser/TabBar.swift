@@ -199,6 +199,10 @@ private struct TabRun: View {
     @State private var target = 0
     @State private var travel: CGFloat = 0
     @State private var stride: CGFloat = 0
+    /// How far the run has scrolled, and how wide its content is, for the
+    /// fade at an edge with tabs beyond it.
+    @State private var scrolled: CGFloat = 0
+    @State private var span: CGFloat = 0
 
     var body: some View {
         ScrollViewReader { reader in
@@ -232,9 +236,25 @@ private struct TabRun: View {
                     }
                 }
                 .frame(height: Metrics.strip)
+                .background {
+                    GeometryReader { box in
+                        let frame = box.frame(in: .named("strip"))
+                        Color.clear
+                            .onChange(of: frame.minX, initial: true) { _, x in scrolled = x }
+                            .onChange(of: frame.width, initial: true) { _, w in span = w }
+                    }
+                }
             }
             .scrollDisabled(!overflowing)
             .frame(width: run)
+            // A run cut off at an edge says so: the tabs fade into the strip
+            // on whichever side has more of them out of sight (2 Oct 2026).
+            .overlay(alignment: .leading) {
+                if overflowing, scrolled < -1 { fade(from: .leading) }
+            }
+            .overlay(alignment: .trailing) {
+                if overflowing, span + scrolled > run + 1 { fade(from: .trailing) }
+            }
             .onAppear { reveal(reader) }
             .onChange(of: overflowing) { _, _ in reveal(reader) }
             .onChange(of: browser.activeID) { _, _ in reveal(reader, gliding: true) }
@@ -245,6 +265,17 @@ private struct TabRun: View {
         .animation(Motion.glide, value: browser.activeID)
         .animation(Motion.glide, value: browser.editingTab)
         .animation(Motion.settle, value: browser.tabs.map(\.id))
+    }
+
+    /// The strip's own ground, thinning to nothing over the first tab or so.
+    private func fade(from edge: UnitPoint) -> some View {
+        LinearGradient(
+            colors: [Palette.ground, Palette.ground.opacity(0)],
+            startPoint: edge,
+            endPoint: edge == .leading ? .trailing : .leading
+        )
+        .frame(width: 22)
+        .allowsHitTesting(false)
     }
 
     /// How far a tab that isn't held has stepped aside: the held tab's own
