@@ -617,7 +617,9 @@ struct Quiet: View {
                     .font(.system(size: 13.5))
                 Spacer(minLength: 0)
             }
-            .foregroundStyle(hovering ? Palette.ink.opacity(0.7) : Palette.faint)
+            // Muted, not faint: faint is for hairlines, and words in it
+            // fell short of readable (2 Oct 2026).
+            .foregroundStyle(hovering ? Palette.ink.opacity(0.7) : Palette.muted)
             .padding(.leading, 11)
             .frame(height: height)
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -87,7 +87,7 @@ struct WelcomePanel: View {
             if sources.isEmpty {
                 Text("No other browser found on this Mac — nothing to bring.")
                     .font(.system(size: 13))
-                    .foregroundStyle(Palette.faint)
+                    .foregroundStyle(Palette.muted)
             } else {
                 VStack(alignment: .leading, spacing: 14) {
                     if sources.count > 1 {
@@ -161,16 +161,18 @@ struct WelcomePanel: View {
                     if asked, !isDefault {
                         Text("macOS asks in its own dialog")
                             .font(.system(size: 13))
-                            .foregroundStyle(Palette.faint)
+                            .foregroundStyle(Palette.muted)
                     }
                 }
             }
             .animation(Motion.settle, value: isDefault)
 
             VStack(alignment: .leading, spacing: 8) {
+                // Muted, not faint, for anything read: faint is the
+                // hairlines' and the dots' (2 Oct 2026).
                 Text("Three things worth knowing")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Palette.faint)
+                    .foregroundStyle(Palette.muted)
                     .textCase(.uppercase)
                     .tracking(0.6)
                     .padding(.top, 6)
@@ -339,7 +341,7 @@ struct WelcomePanel: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 13.5)).foregroundStyle(Palette.ink)
-                    Text(detail).font(.system(size: 11.5)).foregroundStyle(Palette.faint)
+                    Text(detail).font(.system(size: 11.5)).foregroundStyle(Palette.muted)
                 }
                 Spacer()
                 Switch(on: $on)
