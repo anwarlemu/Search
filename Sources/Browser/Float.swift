@@ -45,11 +45,18 @@ final class Float {
 
         let size = NSSize(width: 440, height: 247)
         let screen = NSScreen.main?.visibleFrame ?? .zero
-        let spot = NSRect(
-            x: screen.maxX - size.width - 24,
-            y: screen.minY + 24,
-            width: size.width,
-            height: size.height
+        // Where it was last left, if it fits the screen it is on now; the
+        // bottom right corner the first time. Opening at the one size in
+        // the one corner, every time, undid the sizing and moving you did
+        // the time before (2 Oct 2026).
+        let spot = Float.fit(
+            Store.settings.string(forKey: Float.frameKey).map(NSRectFromString) ?? NSRect(
+                x: screen.maxX - size.width - 24,
+                y: screen.minY + 24,
+                width: size.width,
+                height: size.height
+            ),
+            on: screen
         )
 
         let panel = Panel(
@@ -74,7 +81,7 @@ final class Float {
         panel.aspectRatio = size
         panel.minSize = NSSize(width: 260, height: 146)
 
-        let ground = NSView(frame: NSRect(origin: .zero, size: size))
+        let ground = NSView(frame: NSRect(origin: .zero, size: spot.size))
         ground.wantsLayer = true
         ground.layer?.backgroundColor = NSColor.black.cgColor
         ground.layer?.cornerRadius = 14
@@ -145,10 +152,28 @@ final class Float {
         }
     }
 
+    private static let frameKey = "float.frame"
+
+    /// `frame`, moved and if need be shrunk until it sits on `screen`. A
+    /// window remembered from a larger display must not open off the edge
+    /// of a smaller one.
+    private static func fit(_ frame: NSRect, on screen: NSRect) -> NSRect {
+        guard frame.width > 0, frame.height > 0, screen.width > 0 else { return frame }
+        var out = frame
+        let room = min(screen.width, screen.height * frame.width / frame.height) * 0.85
+        if out.width > room {
+            out.size = NSSize(width: room, height: room * frame.height / frame.width)
+        }
+        out.origin.x = min(max(screen.minX, out.minX), screen.maxX - out.width)
+        out.origin.y = min(max(screen.minY, out.minY), screen.maxY - out.height)
+        return out
+    }
+
     /// Puts the page down and closes. Whoever owns the page takes it back on
     /// their next layout.
     func drop() {
         guard let panel else { return }
+        Store.settings.set(NSStringFromRect(panel.frame), forKey: Float.frameKey)
         ticker?.invalidate()
         ticker = nil
         (page as? WKWebView)?.allowsMagnification = true
