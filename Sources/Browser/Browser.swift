@@ -956,13 +956,30 @@ final class Browser: NSObject, ObservableObject {
             guard let self, let id = self.floating, let tab = self.tab(id) else { return }
             tab.web.evaluateJavaScript(Isolate.where_) { found, _ in
                 MainActor.assumeIsolated {
-                    guard let pair = found as? [Any], pair.count == 2,
-                          let through = pair[0] as? Double,
-                          let playing = pair[1] as? Bool
-                    else { return }
-                    answer(through, playing)
+                    guard let state = Float.State(found) else { return }
+                    answer(state)
                 }
             }
+        }
+        floater.onChapters = { [weak self] answer in
+            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
+            tab.web.evaluateJavaScript(Isolate.chapters) { found, _ in
+                MainActor.assumeIsolated {
+                    let list = (found as? [[Any]] ?? []).compactMap { pair -> Float.Chapter? in
+                        guard pair.count == 2, let start = pair[0] as? Double, let title = pair[1] as? String else { return nil }
+                        return Float.Chapter(start: start, title: title)
+                    }
+                    answer(list)
+                }
+            }
+        }
+        floater.onSeek = { [weak self] seconds in
+            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
+            tab.web.evaluateJavaScript(Isolate.seek(to: seconds))
+        }
+        floater.onCaptions = { [weak self] on in
+            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
+            tab.web.evaluateJavaScript(Isolate.captions(on: on))
         }
         floater.onPlayPause = { [weak self] answer in
             guard let self, let id = self.floating, let tab = self.tab(id) else { return }

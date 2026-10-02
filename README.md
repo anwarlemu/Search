@@ -24,7 +24,7 @@ It was built by a design studio that spends its whole day in a browser and was t
 - **Reading mode.** View › Reading Mode strips a page down to the article.
 - **Hide anything, for good.** `⇧⌘H`, then click a cookie banner, a newsletter overlay, a rail of "related" nonsense — it goes, and it is still gone on that site next time, before the page has drawn a single frame.
 - **An ad blocker that runs before the page.** Third-party trackers and ad networks are stopped at the network level, so there is nothing to render and nothing to slow down. On by default, off per site if something breaks.
-- **Video that follows you.** `⇧⌘P` lifts the video out of the page into a small window that stays above everything, including other apps.
+- **Video that follows you.** `⇧⌘P` lifts the video out of the page into a small window that stays above everything, including other apps. Its captions come with it, drawn in the window, and a video with chapters names the one you are in — click the name to jump to another.
 - **Passwords, in your keychain.** Browser offers to save a sign-in once it has actually worked, and offers your saved accounts under the field when you click it — the way Safari does, never filling anything on its own. Everything lives in the macOS keychain, encrypted by the system, readable only by Browser. Bring yours in from Chrome, Arc, Dia, Brave or Edge in one click; nothing leaves the Mac.
 - **Light, dark, or the Mac's own.** The frame and the pages follow.
 - **Bookmarks, history, downloads** — each a panel, each searchable, each one keystroke away.

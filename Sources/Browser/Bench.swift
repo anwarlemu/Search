@@ -691,6 +691,8 @@ final class Bench {
             if let on = request["peek"] as? Bool { browser.peeking = on }
             if request["floatReturn"] as? Bool == true { browser.floater.onReturn?() }
             if request["floatClose"] as? Bool == true { browser.floater.onClose?() }
+            if let seconds = request["floatSeek"] as? Double { browser.floater.onSeek?(seconds) }
+            if let on = request["floatCaptions"] as? Bool { browser.floater.onCaptions?(on) }
             // The tab menu's Move to Profile, for one tab.
             if let index = request["moveTo"] as? Int, let tab = find(request, in: browser) { browser.move([tab], toProfile: index) }
             if request["closePrivate"] as? Bool == true {
