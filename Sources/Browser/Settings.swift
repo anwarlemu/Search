@@ -518,6 +518,18 @@ struct Segmented<Option: Hashable>: View {
                     .onTapGesture {
                         withAnimation(Motion.settle) { selection = option }
                     }
+                    // A shape with a tap on it is nothing to the keyboard or
+                    // to VoiceOver; each choice is a button that can take
+                    // focus and be pressed with space (2 Oct 2026).
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(title)
+                    .accessibilityAddTraits(option == selection ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityAction { withAnimation(Motion.settle) { selection = option } }
+                    .focusable()
+                    .onKeyPress(.space) {
+                        withAnimation(Motion.settle) { selection = option }
+                        return .handled
+                    }
             }
         }
         .padding(2)
@@ -543,6 +555,16 @@ struct Switch: View {
             .contentShape(Capsule())
             .onTapGesture { withAnimation(Motion.settle) { on.toggle() } }
             .animation(Motion.settle, value: on)
+            // See Segmented: a toggle to VoiceOver, and space flips it.
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isToggle)
+            .accessibilityValue(on ? "On" : "Off")
+            .accessibilityAction { withAnimation(Motion.settle) { on.toggle() } }
+            .focusable()
+            .onKeyPress(.space) {
+                withAnimation(Motion.settle) { on.toggle() }
+                return .handled
+            }
     }
 }
 
