@@ -11,8 +11,11 @@ struct WelcomePanel: View {
     @State private var page = 0
     @State private var forward = true
 
-    // Bringing things over.
-    @State private var source: Chromium.Source? = Chromium.installed().first
+    // Bringing things over. Which browsers are here is a walk through
+    // Application Support, so it is asked once as the panel comes up, not
+    // on every draw of the page (2 Oct 2026).
+    @State private var sources: [Chromium.Source] = []
+    @State private var source: Chromium.Source?
     @State private var wantsPasswords = true
     @State private var wantsHistory = true
     @State private var wantsBookmarks = true
@@ -52,6 +55,10 @@ struct WelcomePanel: View {
         }
         .animation(Motion.glide, value: page)
         .transition(.opacity)
+        .onAppear {
+            sources = Chromium.installed()
+            source = sources.first
+        }
     }
 
     // MARK: - the pages
@@ -77,7 +84,6 @@ struct WelcomePanel: View {
         VStack(alignment: .leading, spacing: 22) {
             heading("Bring things over.", "Passwords go into your keychain, bookmarks into the menu, and history means the address field already knows where you go. Nothing in the other browser changes.")
 
-            let sources = Chromium.installed()
             if sources.isEmpty {
                 Text("No other browser found on this Mac — nothing to bring.")
                     .font(.system(size: 13))
