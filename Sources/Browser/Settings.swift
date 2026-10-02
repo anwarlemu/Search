@@ -48,19 +48,29 @@ struct SettingsPanel: View {
     private static let height: CGFloat = 500
 
     var body: some View {
-        HStack(spacing: 0) {
-            pages
-            Rectangle().fill(Palette.hairline).frame(width: 1)
-            content
+        // Its own size while the window has room for it, and the window's
+        // less a margin when it hasn't: at the window's smallest the panel
+        // used to stand taller than the window (2 Oct 2026). The page
+        // inside scrolls either way.
+        GeometryReader { geo in
+            HStack(spacing: 0) {
+                pages
+                Rectangle().fill(Palette.hairline).frame(width: 1)
+                content
+            }
+            .frame(
+                width: min(SettingsPanel.width, max(0, geo.size.width - 40)),
+                height: min(SettingsPanel.height, max(0, geo.size.height - 40))
+            )
+            .background(Palette.ground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Palette.hairline, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: .black.opacity(0.16), radius: 34, y: 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: SettingsPanel.width, height: SettingsPanel.height)
-        .background(Palette.ground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Palette.hairline, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.16), radius: 34, y: 12)
         .onChange(of: page) { _, page in Store.settings.set(page.rawValue, forKey: "settings.page") }
     }
 
