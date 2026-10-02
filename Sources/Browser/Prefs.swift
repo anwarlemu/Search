@@ -133,10 +133,15 @@ final class Preferences: ObservableObject {
     init() {
         // Carried over from when there were four ways of holding the browser
         // and this was one of them.
-        // Light unless asked otherwise — the browser was only ever light
-        // before this was a choice.
         bench = store.bool(forKey: "bench")
-        let chosen = store.string(forKey: "look").flatMap(Look.init) ?? .light
+        // The Mac's own look for a fresh install (2 Oct 2026). Anyone here
+        // from before this was a choice stays light, which is all the
+        // browser ever was for them — and whichever it is, it is written
+        // down now, so walking through the welcome can't turn it over on
+        // the next launch.
+        let before = store.bool(forKey: "welcomed") || store.object(forKey: "glyph") != nil
+        let chosen = store.string(forKey: "look").flatMap(Look.init) ?? (before ? .light : .system)
+        store.set(chosen.rawValue, forKey: "look")
         look = chosen
         // Before the first window, and not deferred: the window that is about
         // to be made should be made in the right appearance.
