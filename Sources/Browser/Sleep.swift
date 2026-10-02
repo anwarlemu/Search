@@ -96,13 +96,13 @@ extension Browser {
                 done?("holding something typed")
                 return
             }
-            if let reason = self.awake(because: tab, parking: parking) {
+            if let reason = self.awake(because: tab, parking: self.parked(tab, parking)) {
                 done?(reason)
                 return
             }
             tab.snapshot { [weak self, weak tab] picture in
                 guard let self, let tab else { return }
-                if let reason = self.awake(because: tab, parking: parking) {
+                if let reason = self.awake(because: tab, parking: self.parked(tab, parking)) {
                     done?(reason)
                     return
                 }
@@ -110,5 +110,13 @@ extension Browser {
                 done?("asleep")
             }
         }
+    }
+
+    /// Whether a tab being parked still is, a moment later. Each step above
+    /// takes a beat, and a profile switched away from and straight back
+    /// put the tab on screen again with "parked" still said of it — so the
+    /// tab you were looking at went to sleep under you (2 Oct 2026).
+    private func parked(_ tab: Tab, _ parking: Bool) -> Bool {
+        parking && !tabs.contains { $0.id == tab.id }
     }
 }
