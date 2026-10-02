@@ -1553,6 +1553,20 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
+    /// An address typed, pasted or picked: into the tab on screen — or a
+    /// new one beside it while that tab's video is out in the little
+    /// window, the way a bookmark or a link from another app already
+    /// goes. Typed over a floating tab, the address took the page out from
+    /// under the video (2 Oct 2026).
+    private func go(to url: URL) {
+        guard let tab = active ?? tabs.first else { return }
+        if tab.floating {
+            open(url, foreground: true)
+        } else {
+            tab.go(to: url)
+        }
+    }
+
     /// ⌘⇧N. A tab that keeps nothing — its own cookies, its own sign-ins, no
     /// history, and no place in tomorrow's session.
     func newShyTab() {
@@ -1583,7 +1597,7 @@ final class Browser: NSObject, ObservableObject {
             refusals += 1
             return
         }
-        (active ?? tabs.first)?.go(to: url)
+        go(to: url)
         editing = false
         typed = ""
     }
@@ -1876,7 +1890,7 @@ final class Browser: NSObject, ObservableObject {
         if let id = offer.tab, let tab = tabs.first(where: { $0.id == id }) {
             select(tab)
         } else {
-            (active ?? tabs.first)?.go(to: offer.url)
+            go(to: offer.url)
         }
         editing = false
         typed = ""
@@ -1968,7 +1982,7 @@ final class Browser: NSObject, ObservableObject {
             refusals += 1
             return
         }
-        (active ?? tabs.first)?.go(to: url)
+        go(to: url)
         editing = false
         typed = ""
     }
