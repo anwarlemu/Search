@@ -165,9 +165,7 @@ final class Preferences: ObservableObject {
         let width = store.object(forKey: "sidebar.width") as? Double ?? Double(Metrics.side)
         sideWidth = min(Metrics.sideMax, max(Metrics.sideMin, CGFloat(width)))
         glyph = store.string(forKey: "glyph").flatMap(Glyph.init) ?? .letters
-        // Off unless asked for: a tab that comes back a picture, then a
-        // rebuilt page, reads as the browser forgetting it (2 Oct 2026).
-        sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? false
+        sleepsTabs = store.object(forKey: "tabs.sleep") as? Bool ?? true
         shielded = store.object(forKey: "shield") as? Bool ?? true
         // Offered only in a build that can actually do them — one with
         // Apple's browser entitlement and its profile embedded. A choice made
