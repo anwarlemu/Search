@@ -527,7 +527,7 @@ enum ExtensionShims {
       if (chrome.idle && !chrome.idle.onStateChanged) {
         // Asked every so often while anyone listens, the way Chrome
         // notices on its own.
-        const changed = event(), add = changed.addListener;
+        const changed = event(), add = changed.addListener, remove = changed.removeListener;
         let every = 60, state = "active", timer = null;
         changed.addListener = (f) => {
           add(f);
@@ -537,6 +537,12 @@ enum ExtensionShims {
             state = now;
             for (const g of changed.listeners) try { g(now); } catch (e) { setTimeout(() => { throw e; }); }
           }).catch(() => {}), 15000);
+        };
+        // And stopped once nobody listens: it went on asking the browser
+        // every fifteen seconds for good (2 Oct 2026).
+        changed.removeListener = (f) => {
+          remove(f);
+          if (timer && !changed.listeners.size) { clearInterval(timer); timer = null; }
         };
         put(chrome.idle, "onStateChanged", changed);
         put(chrome.idle, "setDetectionInterval", (seconds) => { every = Math.max(15, Number(seconds) || 60); });
