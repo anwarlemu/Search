@@ -36,13 +36,13 @@ extension Browser {
 
         // Where you were, leaving out what is open already — a tab you have
         // is a ⌘K away, not a thing to open twice.
-        let open = Set(tabs.compactMap { $0.address.map { Address.pretty($0).lowercased() } })
+        let open = Set(tabs.compactMap { $0.address.map { Address.identity($0) } })
         let everything = history.everything()
         var used = Set<String>()
         for trace in everything.filter({ !open.contains($0.key) }).prefix(3) {
             used.insert(trace.key)
             list.append(Suggestion(
-                key: trace.key, title: trace.title, url: trace.url, kind: .recent, section: "Recent"
+                key: trace.label, title: trace.title, url: trace.url, kind: .recent, section: "Recent"
             ))
         }
         let frequent = everything
@@ -51,7 +51,7 @@ extension Browser {
             .prefix(3)
         for trace in frequent {
             list.append(Suggestion(
-                key: trace.key, title: trace.title, url: trace.url, kind: .frequent, section: "Frequent"
+                key: trace.label, title: trace.title, url: trace.url, kind: .frequent, section: "Frequent"
             ))
         }
 

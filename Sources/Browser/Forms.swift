@@ -106,7 +106,11 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       if (window.__officeForms) return;
 
       // The password box, and the last box before it that could hold a name.
+      var cachedPair = null, pairDirty = true;
       function pair() {
+        if (!pairDirty && (!cachedPair || (cachedPair.pass.isConnected && (!cachedPair.user || cachedPair.user.isConnected)))) return cachedPair;
+        pairDirty = false;
+        cachedPair = null;
         var boxes = document.querySelectorAll('input[type="password"]');
         var pass = null;
         for (var p = 0; p < boxes.length; p++) {
@@ -123,7 +127,8 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           var kind = (all[i].type || 'text').toLowerCase();
           if (kind === 'text' || kind === 'email' || kind === 'tel') user = all[i];
         }
-        return { user: user, pass: pass };
+        cachedPair = { user: user, pass: pass };
+        return cachedPair;
       }
 
       function put(box, value) {
@@ -213,6 +218,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         return { total: text, yours: choices, asks: asks };
       }
       var planned = null, plannedFor = null, filledOn = null;
+      var lastOffer = '', lastOfferElement = null;
       function propose() {
         var el = document.activeElement;
         var rect = null, kinds = [], total = 0, yours = 0;
@@ -234,15 +240,19 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           plannedFor = null;
           planned = null;
         }
-        window.webkit.messageHandlers.officeForms.postMessage({
-          kind: 'offer', rect: rect, kinds: kinds, total: total, yours: yours
-        });
+        var message = { kind: 'offer', rect: rect, kinds: kinds, total: total, yours: yours };
+        var key = JSON.stringify(message);
+        if (key !== lastOffer || el !== lastOfferElement) {
+          lastOffer = key; lastOfferElement = el;
+          window.webkit.messageHandlers.officeForms.postMessage(message);
+        }
+        return rect !== null;
       }
 
       // The dot in a filled box: where its answer came from, on hover. It
       // follows the box as the page moves, and goes the moment you type
       // over the answer — then it is yours, not the card's.
-      var dots = [];
+      var dots = [], dotTimer = null;
       function dot(box, source) {
         var d = document.createElement('span');
         d.setAttribute('data-office-dot', '');
@@ -252,6 +262,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           + 'z-index:2147483646;pointer-events:auto;cursor:default;';
         document.documentElement.appendChild(d);
         dots.push({ box: box, dot: d });
+        if (dotTimer === null) dotTimer = setInterval(placeDots, 500);
         box.addEventListener('input', function gone(e) {
           if (!e.isTrusted) return;
           d.remove();
@@ -273,10 +284,8 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           p.dot.style.left = (r.right - 14) + 'px';
           p.dot.style.top = (r.top + r.height / 2 - 3) + 'px';
         }
+        if (!dots.length && dotTimer !== null) { clearInterval(dotTimer); dotTimer = null; }
       }
-      window.addEventListener('scroll', placeDots, true);
-      window.addEventListener('resize', placeDots);
-      setInterval(function () { if (dots.length) placeDots(); }, 500);
 
       function fillForm(values, sources) {
         var el = plannedFor && plannedFor.isConnected ? plannedFor : document.activeElement;
@@ -403,31 +412,40 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         }
       }, true);
 
-      var told = false;
-      function tell() {
-        if (told || !pair()) return;
-        told = true;
-        window.webkit.messageHandlers.officeForms.postMessage({ kind: 'form' });
+      var told = false, settling = null, checking = null;
+      function checkForms() {
+        checking = null;
+        pairDirty = true;
+        plannedFor = null;
+        var both = pair();
+        if (both) {
+          clearTimeout(settling);
+          if (!told) window.webkit.messageHandlers.officeForms.postMessage({ kind: 'form' });
+          told = true;
+        } else if (told) {
+          told = false;
+          clearTimeout(settling);
+          settling = setTimeout(function () {
+            if (pair()) return;
+            window.webkit.messageHandlers.officeForms.postMessage({ kind: 'settled' });
+          }, 400);
+        }
+        caret();
       }
-      if (document.readyState === 'complete') { tell(); }
-      else { window.addEventListener('load', tell); }
-      // A form the page builds for itself, a moment after it loads — or the
-      // password step of a sign-in that asks for the name first.
-      setTimeout(tell, 700);
-      setTimeout(tell, 2200);
-      // The boxes going away without a new page — a sign-in done in place —
-      // is the other way a sign-in shows it took.
-      var settling = null;
-      new MutationObserver(function () {
-        if (!told) { tell(); return; }
-        if (pair()) return;
-        told = false;
-        clearTimeout(settling);
-        settling = setTimeout(function () {
-          if (pair()) return;
-          window.webkit.messageHandlers.officeForms.postMessage({ kind: 'settled' });
-        }, 400);
-      }).observe(document.documentElement, { childList: true, subtree: true });
+      function queueForms() {
+        // A burst of DOM edits causes one scan, without postponing it forever
+        // on pages whose feed keeps changing.
+        pairDirty = true;
+        plannedFor = null;
+        if (checking === null) checking = setTimeout(checkForms, 120);
+      }
+      new MutationObserver(queueForms).observe(document.documentElement, {
+        childList: true, subtree: true, attributes: true,
+        attributeFilter: ['type', 'hidden', 'class', 'autocomplete', 'disabled']
+      });
+      window.addEventListener('load', queueForms);
+      setTimeout(queueForms, 700);
+      setTimeout(queueForms, 2200);
 
       // Whether the caret is somewhere on the page that takes typing.
       //
@@ -445,31 +463,38 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
                 'date', 'datetime-local', 'month', 'week', 'time'].indexOf(kind) >= 0;
       }
 
-      function caret() {
+      var lastFocus = '', lastFocusElement = null, followingField = false;
+      function caret(geometryOnly) {
         var el = document.activeElement;
-        var both = pair();
+        // Scrolls reuse the known fields. A focus change or a coalesced DOM
+        // check refreshes them; ordinary scrolling never scans the document.
+        var both = geometryOnly === true ? cachedPair : pair();
         var rect = null;
-        if (both && el && (el === both.user || el === both.pass)) {
+        if (both && el && (el === both.user || el === both.pass) && el.isConnected) {
           var r = el.getBoundingClientRect();
           if (r.width > 0 && r.height > 0) rect = { x: r.left, y: r.top, w: r.width, h: r.height };
         }
-        window.webkit.messageHandlers.officeForms.postMessage({
-          kind: 'focus',
-          typing: editable(el),
-          rect: rect
-        });
-        propose();
+        var message = { kind: 'focus', typing: editable(el), rect: rect };
+        var key = JSON.stringify(message);
+        if (key !== lastFocus || el !== lastFocusElement) {
+          lastFocus = key; lastFocusElement = el;
+          window.webkit.messageHandlers.officeForms.postMessage(message);
+        }
+        var offered = propose();
+        followingField = rect !== null || offered;
       }
 
-      // The box moves when the page scrolls or the window changes size, and
-      // whatever hangs from it has to move too. Once a frame at most.
       var moving = false;
       function moved() {
-        if (moving) return;
+        if (moving || (!followingField && !dots.length)) return;
         moving = true;
-        requestAnimationFrame(function () { moving = false; caret(); });
+        requestAnimationFrame(function () {
+          moving = false;
+          if (followingField) caret(true);
+          if (dots.length) placeDots();
+        });
       }
-      window.addEventListener('scroll', moved, true);
+      window.addEventListener('scroll', moved, { capture: true, passive: true });
       window.addEventListener('resize', moved);
 
       // Going full screen, announced before it happens rather than after.
@@ -500,7 +525,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           };
         });
 
-      document.addEventListener('focusin', caret, true);
+      document.addEventListener('focusin', function () { pairDirty = true; caret(); }, true);
       document.addEventListener('focusout', function () { setTimeout(caret, 0); }, true);
       document.addEventListener('mouseup', function () { setTimeout(caret, 0); }, true);
       caret();

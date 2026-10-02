@@ -78,6 +78,7 @@ final class Browser: NSObject, ObservableObject {
     @Published private(set) var profileNames: [String] = [Session.firstName]
     /// Which one is on screen — its tabs are `tabs`.
     @Published private(set) var profile = 0
+    private(set) var profileRevision = 0
     /// The tabs of the others, by index: asleep, holding no web view.
     struct Parked {
         var tabs: [Tab]
@@ -157,6 +158,7 @@ final class Browser: NSObject, ObservableObject {
     /// at once, and loaded only when looked at.
     func switchProfile(to index: Int) {
         guard index != profile, profileNames.indices.contains(index) else { return }
+        profileRevision += 1
         cancelTabEdit()
         closeFind()
         if veiling { toggleHiding() }
@@ -597,8 +599,10 @@ final class Browser: NSObject, ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async {
             let places = Chromium.places(in: source)
             DispatchQueue.main.async {
-                for place in places {
-                    self.history.take(place.url, title: place.title, count: place.count, last: place.last)
+                self.history.batch {
+                    for place in places {
+                        self.history.take(place.url, title: place.title, count: place.count, last: place.last)
+                    }
                 }
                 self.history.settle()
                 done(places.count)
@@ -801,7 +805,7 @@ final class Browser: NSObject, ObservableObject {
             edit()
             return
         }
-        tabDraft = Address.pretty(url)
+        tabDraft = Address.editable(url)
         editingTab = tab.id
     }
 
@@ -865,6 +869,7 @@ final class Browser: NSObject, ObservableObject {
     var pressure: DispatchSourceMemoryPressure?
     /// Downloads still under way. See `keep(_:)`.
     var downloading: [WKDownload] = []
+    @Published var transfers: [Transfer] = []
     /// The Chrome Web Store's pages, told when installs come and go. See StoreRelay.swift.
     var storeWatch: AnyCancellable?
     private var hush: DispatchWorkItem?
@@ -1077,6 +1082,7 @@ final class Browser: NSObject, ObservableObject {
         guard isPrivate else { return }
         land()
         dozing?.invalidate()
+        endDownloads()
         for tab in tabs { tab.close() }
         tabs = []
         ghosts = []
@@ -1895,7 +1901,8 @@ final class Browser: NSObject, ObservableObject {
     /// and Escape puts it back.
     func edit() {
         summoning = false
-        typed = active?.address.map { Address.pretty($0) } ?? ""
+        typed = active?.address.map(Address.editable) ?? ""
+        ending = nil
         editing = true
         focusRequest += 1
     }
@@ -2047,6 +2054,9 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // The next document gets this site's stylesheet of hidden things,
         // decided here because here is the last moment before it loads.
         if action.targetFrame?.isMainFrame ?? true, let tab = tab(for: webView) {
+            tab.invalidateNavigation()
+            let method = (action.request.httpMethod ?? "GET").uppercased()
+            tab.navigationRequest = ["GET", "HEAD"].contains(method) ? action.request : nil
             let host = curtain.host(of: url)
             tab.arm(hiding: curtain.css(on: host), at: url.host()?.lowercased())
             // And the blocker, on or off for where it is going.
@@ -2107,13 +2117,6 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         didBecome download: WKDownload
     ) {
         keep(download)
-    }
-
-    /// Every download this window has going, heard from until it ends — and
-    /// counted, so a tab still sending one to disk is never put to sleep.
-    func keep(_ download: WKDownload) {
-        download.delegate = self
-        downloading.append(download)
     }
 
     /// Without this WebKit refuses every request out of hand, and a page that
@@ -2189,41 +2192,55 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         watchStart(tab)
     }
 
-    /// A page asked for that hasn't started to arrive in ten seconds, on a
-    /// site with a service worker: the worker is the likely reason. A
-    /// worker that stops answering holds every navigation to its site until
-    /// the network gives up a minute later — YouTube and Stripe's dashboard
-    /// both did (24 Sep 2026). That site's workers are cleared and the page
-    /// asked for again; the site registers a fresh one as it loads. Costs a
-    /// timer per navigation, and nothing at all on a page that arrives.
+    /// Time alone cannot diagnose a broken service worker. Offer recovery,
+    /// and keep every callback attached to the navigation that prompted it.
     private func watchStart(_ tab: Tab) {
-        tab.stuck?.cancel()
+        tab.invalidateNavigation()
+        let token = tab.navigationID
         let work = DispatchWorkItem { [weak self, weak tab] in
-            guard let self, let tab, tab.loading, let web = tab.built,
-                  let url = web.url ?? tab.address, let host = url.host()?.lowercased(),
-                  !tab.rescued.contains(host)
-            else { return }
-            self.rescue(tab, host: host, url: url)
+            guard let self, let tab, let web = tab.built,
+                  self.tab(tab.id) === tab, tab.navigationID == token, tab.loading else { return }
+            tab.slow = true
+            guard let host = tab.navigationRequest?.url?.host()?.lowercased(), tab.canRetryNavigation else { return }
+            let kind: Set<String> = [WKWebsiteDataTypeServiceWorkerRegistrations]
+            web.configuration.websiteDataStore.fetchDataRecords(ofTypes: kind) { [weak tab, weak web] records in
+                MainActor.assumeIsolated {
+                    guard let tab, let web, tab.built === web, tab.navigationID == token, tab.slow else { return }
+                    tab.workerRecoveryAvailable = records.contains { host == $0.displayName || host.hasSuffix("." + $0.displayName) }
+                }
+            }
         }
         tab.stuck = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: work)
     }
 
-    /// Clears the site's service workers, if it has any, and asks again.
-    private func rescue(_ tab: Tab, host: String, url: URL) {
-        guard let web = tab.built else { return }
+    func retrySlowPage(_ tab: Tab, resetWorker: Bool) {
+        guard tab.slow, !tab.recoveryPending, tab.canRetryNavigation,
+              let request = tab.navigationRequest, let host = request.url?.host()?.lowercased(),
+              let web = tab.built else { return }
+        guard resetWorker else {
+            tab.invalidateNavigation()
+            web.stopLoading()
+            web.load(request)
+            return
+        }
+        guard tab.workerRecoveryAvailable else { return }
+        let token = tab.navigationID
+        tab.recoveryPending = true
         let store = web.configuration.websiteDataStore
         let kind: Set<String> = [WKWebsiteDataTypeServiceWorkerRegistrations]
-        store.fetchDataRecords(ofTypes: kind) { [weak self, weak tab] records in
+        store.fetchDataRecords(ofTypes: kind) { [weak tab, weak web] records in
             MainActor.assumeIsolated {
+                guard let tab, let web, tab.built === web, tab.navigationID == token,
+                      tab.slow, tab.loading else { return }
                 let mine = records.filter { host == $0.displayName || host.hasSuffix("." + $0.displayName) }
-                guard let self, let tab, !mine.isEmpty, tab.loading else { return }
-                tab.rescued.insert(host)
+                guard !mine.isEmpty else { tab.recoveryPending = false; tab.workerRecoveryAvailable = false; return }
                 store.removeData(ofTypes: kind, for: mine) {
                     MainActor.assumeIsolated {
-                        tab.built?.stopLoading()
-                        tab.built?.load(URLRequest(url: url))
-                        self.announce("Reloaded — \(host)'s background worker had stopped answering")
+                        guard tab.built === web, tab.navigationID == token, tab.slow, tab.loading else { return }
+                        tab.invalidateNavigation()
+                        web.stopLoading()
+                        web.load(request)
                     }
                 }
             }
@@ -2232,7 +2249,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         guard let tab = tab(for: webView) else { return }
-        tab.stuck?.cancel()
+        tab.invalidateNavigation()
         tab.failure = nil
         tab.typing = false
         // Whatever you last set this site to, before it draws a single frame
@@ -2253,6 +2270,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard let tab = tab(for: webView), let url = tab.address else { return }
+        tab.invalidateNavigation()
         tab.uncover()
         tellStore(tab)
         // A page that arrived after a password went out: did the sign-in take?
@@ -2267,12 +2285,12 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
 
     private func fail(_ webView: WKWebView, _ error: Error) {
         tab(for: webView)?.uncover()
-        tab(for: webView)?.stuck?.cancel()
         let nsError = error as NSError
         let code = nsError.code
         // Cancelled is not a failure: it's what a redirect, a stopped load, or
         // a second Return in quick succession looks like from here.
         guard code != NSURLErrorCancelled else { return }
+        tab(for: webView)?.invalidateNavigation()
         // Nor is a page that turned into a download: WebKit ends that
         // navigation with "frame load interrupted" (102) while the file goes
         // on arriving. Answered as a failure, it covered the page with "The
@@ -2303,81 +2321,3 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         tabs.first { $0.built === webView }
     }
 }
-
-// MARK: - keeping files
-
-extension Browser: WKDownloadDelegate {
-    func download(
-        _ download: WKDownload,
-        decideDestinationUsing response: URLResponse,
-        suggestedFilename: String,
-        completionHandler: @escaping (URL?) -> Void
-    ) {
-        let asked = response.url.flatMap { namedDownloads.removeValue(forKey: $0) }
-        let name = asked ?? (suggestedFilename.isEmpty ? "download" : suggestedFilename)
-
-        guard !prefs.asksWhereToSave else {
-            let panel = NSSavePanel()
-            panel.nameFieldStringValue = name
-            panel.directoryURL = prefs.downloads
-            panel.canCreateDirectories = true
-            guard panel.runModal() == .OK, let url = panel.url else {
-                completionHandler(nil)
-                return
-            }
-            completionHandler(url)
-            announce("Downloading \(url.lastPathComponent)")
-            return
-        }
-
-        completionHandler(Browser.free(name, in: prefs.downloads))
-        announce("Downloading \(name)")
-    }
-
-    func downloadDidFinish(_ download: WKDownload) {
-        downloading.removeAll { $0 === download }
-        guard let file = download.progress.fileURL else {
-            announce("Download finished")
-            return
-        }
-        if !isPrivate { loot.add(
-            Keep(
-                name: file.lastPathComponent,
-                from: download.originalRequest?.url?.host() ?? "",
-                path: file.path,
-                date: Date()
-            )
-        ) }
-        announce("Saved \(file.lastPathComponent)")
-    }
-
-    func download(
-        _ download: WKDownload,
-        didFailWithError error: Error,
-        resumeData: Data?
-    ) {
-        downloading.removeAll { $0 === download }
-        announce("Download failed")
-    }
-
-    /// WebKit refuses to write over a file that is already there, so the name
-    /// gains a number rather than the download quietly failing.
-    private static func free(_ name: String, in folder: URL) -> URL {
-        let stem = (name as NSString).deletingPathExtension
-        let ext = (name as NSString).pathExtension
-        var candidate = folder.appendingPathComponent(name)
-        var n = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            let next = ext.isEmpty ? "\(stem) \(n)" : "\(stem) \(n).\(ext)"
-            candidate = folder.appendingPathComponent(next)
-            n += 1
-        }
-        return candidate
-    }
-}
-
-
-
-
-
-

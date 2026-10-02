@@ -70,12 +70,42 @@ enum Address {
         return tld.count >= 2 && tld.allSatisfy { $0.isLetter }
     }
 
-    /// What the tab says before the page has told us its title: the address,
-    /// with the parts nobody reads taken off.
+    /// Editing must round-trip every part of an address, including its scheme.
+    static func editable(_ url: URL) -> String { url.absoluteString }
+
+    /// Only the scheme and host are case-insensitive. Paths, queries, ports
+    /// and fragments distinguish pages and must survive history/imports.
+    static func identity(_ url: URL) -> String {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url.absoluteString
+        }
+        parts.scheme = parts.scheme?.lowercased()
+        parts.host = parts.host?.lowercased()
+        if ["http", "https"].contains(parts.scheme ?? ""), parts.path.isEmpty { parts.path = "/" }
+        return parts.string ?? url.absoluteString
+    }
+
+    static func home(_ url: URL) -> URL? {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false), parts.host != nil else { return nil }
+        parts.path = "/"
+        parts.query = nil
+        parts.fragment = nil
+        parts.user = nil
+        parts.password = nil
+        return parts.url
+    }
+
+    /// A compact label, never a storage key or an editable address.
     static func pretty(_ url: URL) -> String {
-        guard let host = url.host() else { return url.absoluteString }
-        let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-        let path = url.path()
-        return path.isEmpty || path == "/" ? bare : bare + path
+        guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+              var parts = URLComponents(url: url, resolvingAgainstBaseURL: false), let host = parts.host
+        else { return url.absoluteString }
+        parts.scheme = nil
+        parts.user = nil
+        parts.password = nil
+        if host.hasPrefix("www.") { parts.host = String(host.dropFirst(4)) }
+        if parts.path == "/", parts.query == nil, parts.fragment == nil { parts.path = "" }
+        let label = parts.string ?? url.absoluteString
+        return label.hasPrefix("//") ? String(label.dropFirst(2)) : label
     }
 }

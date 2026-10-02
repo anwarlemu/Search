@@ -41,6 +41,18 @@ enum When {
 
 struct HistoryPanel: View {
     @ObservedObject var browser: Browser
+    @ObservedObject private var history: History
+
+    init(browser: Browser) {
+        self.browser = browser
+        self.history = browser.history
+    }
+
+    private struct Day: Identifiable {
+        let id: Date
+        let rows: [History.Trace]
+    }
+    @State private var days: [Day] = []
 
     @FocusState private var hunting: Bool
     @State private var traces: [History.Trace] = []
@@ -55,26 +67,24 @@ struct HistoryPanel: View {
                     Card { Nothing(browser.recallHunt.isEmpty ? "Nothing yet." : "Nothing matches.") }
                 } else {
                     ScrollView(showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 14) {
-                            ForEach(days, id: \.0) { day, rows in
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Caption(day)
-                                    Card {
-                                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, trace in
-                                            if index > 0 { Rule() }
-                                            Row(
-                                                trace: trace,
-                                                go: {
-                                                    browser.recalling = false
-                                                    browser.active?.go(to: trace.url)
-                                                },
-                                                forget: {
-                                                    browser.history.forget(trace.key)
-                                                    refresh()
-                                                }
-                                            )
-                                        }
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(days) { day in
+                                Section {
+                                    ForEach(day.rows) { trace in
+                                        Row(
+                                            trace: trace,
+                                            go: {
+                                                browser.recalling = false
+                                                browser.active?.go(to: trace.url)
+                                            },
+                                            forget: { history.forget(trace.key) }
+                                        )
+                                        .overlay(alignment: .bottom) { Rule() }
                                     }
+                                } header: {
+                                    Caption(When.day(day.id))
+                                        .padding(.top, 12)
+                                        .padding(.bottom, 6)
                                 }
                             }
                         }
@@ -101,7 +111,12 @@ struct HistoryPanel: View {
             hunting = true
             refresh()
         }
-        .onChange(of: browser.recallHunt) { _, _ in refresh() }
+        .task(id: browser.recallHunt) {
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            refresh()
+        }
+        .onReceive(history.objectWillChange.debounce(for: .milliseconds(50), scheduler: RunLoop.main)) { _ in refresh() }
     }
 
     /// Three separate things, worded so nobody has to guess which one signs
@@ -133,16 +148,11 @@ struct HistoryPanel: View {
         .transition(.opacity)
     }
 
-    private var days: [(String, [History.Trace])] {
+    private func refresh() {
+        traces = history.everything(matching: browser.recallHunt)
         let calendar = Calendar.current
         let grouped = Dictionary(grouping: traces) { calendar.startOfDay(for: $0.last) }
-        return grouped.keys.sorted(by: >).map { day in
-            (When.day(day), grouped[day]!.sorted { $0.last > $1.last })
-        }
-    }
-
-    private func refresh() {
-        traces = browser.history.everything(matching: browser.recallHunt)
+        days = grouped.keys.sorted(by: >).map { Day(id: $0, rows: grouped[$0] ?? []) }
     }
 
     /// One line. A title, where it came from, and when — the three things you
@@ -157,13 +167,13 @@ struct HistoryPanel: View {
         var body: some View {
             HStack(spacing: 12) {
                 Mark(icon: Favicons.shared.cached(trace.url.host()?.lowercased() ?? ""),
-                     letter: trace.key.first.map { String($0).uppercased() } ?? "•", size: 16)
+                     letter: trace.label.first.map { String($0).uppercased() } ?? "•", size: 16)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(trace.title.isEmpty ? trace.key : trace.title)
+                    Text(trace.title.isEmpty ? trace.label : trace.title)
                         .font(.system(size: 13))
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1)
-                    Text(trace.key)
+                    Text(trace.label)
                         .font(.system(size: 11.5))
                         .foregroundStyle(Palette.muted)
                         .lineLimit(1)
@@ -196,11 +206,15 @@ struct DownloadsPanel: View {
 
     var body: some View {
         Plate("Downloads", width: 560, close: { browser.hoarding = false }) {
-            if loot.kept.isEmpty {
+            if loot.kept.isEmpty && browser.transfers.isEmpty {
                 Card { Nothing("Nothing downloaded yet.") }
             } else {
                 ScrollView(showsIndicators: false) {
                     Card {
+                        ForEach(browser.transfers) { transfer in
+                            TransferRow(browser: browser, transfer: transfer)
+                            Rule()
+                        }
                         ForEach(Array(loot.kept.enumerated()), id: \.element.id) { index, keep in
                             if index > 0 { Rule() }
                             Row(
@@ -217,13 +231,13 @@ struct DownloadsPanel: View {
             }
         } foot: {
             HStack {
-                Text(loot.kept.isEmpty ? "Files land in \(browser.prefs.downloads.lastPathComponent)"
-                     : "Clearing the list leaves the files where they are")
+                Text(loot.kept.isEmpty && browser.transfers.isEmpty ? "Files land in \(browser.prefs.downloads.lastPathComponent)"
+                     : "Active downloads and saved files are kept")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
                 Spacer()
-                if !loot.kept.isEmpty {
-                    Pill("Clear list") { loot.forgetAll() }
+                if !loot.kept.isEmpty || !browser.transfers.isEmpty {
+                    Pill("Clear list") { browser.clearDownloads() }
                 }
             }
         }

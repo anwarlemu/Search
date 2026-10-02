@@ -11,6 +11,7 @@ import WebKit
 /// what turns that into a redraw.
 struct Page: View {
     @ObservedObject var tab: Tab
+    var retry: (Bool) -> Void = { _ in }
 
     var body: some View {
         ZStack {
@@ -57,6 +58,33 @@ struct Page: View {
                     // longer is still arriving when a quick flick has already
                     // let go.
                     .transition(.opacity.combined(with: .scale(scale: 0.85)))
+            }
+        }
+        .overlay(alignment: .top) {
+            if tab.slow {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("This page is taking longer than usual.")
+                        .foregroundStyle(Palette.ink)
+                    HStack(spacing: 12) {
+                        Button("Keep waiting") { tab.slow = false }
+                        Button("Stop") { tab.stop() }
+                        if tab.canRetryNavigation {
+                            Button("Retry") { retry(false) }
+                        }
+                    }
+                    if tab.workerRecoveryAvailable {
+                        Button(tab.recoveryPending ? "Resetting…" : "Reset site worker and retry") { retry(true) }
+                            .disabled(tab.recoveryPending)
+                    }
+                }
+                .font(.system(size: 12))
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.muted)
+                .padding(14)
+                .background(Palette.ground, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Palette.hairline))
+                .shadow(color: .black.opacity(0.10), radius: 12, y: 4)
+                .padding(12)
             }
         }
         // Where a click would go, in the corner, the way every browser has

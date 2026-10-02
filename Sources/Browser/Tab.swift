@@ -688,6 +688,7 @@ final class Tab: ObservableObject, Identifiable {
     }
 
     func go(to url: URL) {
+        invalidateNavigation()
         // Set straight away rather than waiting for the observer: the tab has to
         // stop being blank in the same frame the field disappears, or the empty
         // state flashes back for an instant on its way out.
@@ -827,10 +828,26 @@ final class Tab: ObservableObject, Identifiable {
     /// The watch on a page that has been asked for and hasn't started to
     /// arrive. See Browser.watchStart.
     var stuck: DispatchWorkItem?
-    /// Hosts whose service workers were already cleared for this tab, so a
-    /// site that is simply slow is never cleared twice.
-    var rescued: Set<String> = []
+    var navigationID = UUID()
+    @Published var slow = false
+    @Published var workerRecoveryAvailable = false
+    @Published var recoveryPending = false
+    var navigationRequest: URLRequest?
 
+    var canRetryNavigation: Bool {
+        guard let request = navigationRequest,
+              ["http", "https"].contains(request.url?.scheme?.lowercased() ?? "") else { return false }
+        return ["GET", "HEAD"].contains((request.httpMethod ?? "GET").uppercased())
+    }
+
+    func invalidateNavigation() {
+        navigationID = UUID()
+        stuck?.cancel()
+        stuck = nil
+        slow = false
+        workerRecoveryAvailable = false
+        recoveryPending = false
+    }
     /// The process behind this page just died while it was the one on
     /// screen. `reload()`/`reloadFromOrigin()` lean on state the dead
     /// process was keeping — asking for the address back instead is the
@@ -987,7 +1004,7 @@ final class Tab: ObservableObject, Identifiable {
             web.reload()
         }
     }
-    func stop() { web.stopLoading() }
+    func stop() { invalidateNavigation(); built?.stopLoading() }
     /// Straight through, every time. A page that has to be fetched again is
     /// fetched again — nothing is kept behind to make that look otherwise.
     func back() { web.goBack() }
@@ -1012,6 +1029,7 @@ final class Tab: ObservableObject, Identifiable {
     /// back-forward cache. The tab keeps its address; `web` builds again the
     /// next time anyone asks for it.
     private func discard() {
+        invalidateNavigation()
         watch = []
         ears.stop()
         guard let web = built else { return }
@@ -1557,4 +1575,3 @@ final class LinkRelay: NSObject, WKScriptMessageHandler {
     })();
     """
 }
-

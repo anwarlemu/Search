@@ -1,5 +1,16 @@
 import SwiftUI
 
+private struct PanelSizeKey: EnvironmentKey {
+    static let defaultValue = CGSize(width: 900, height: 700)
+}
+
+extension EnvironmentValues {
+    var panelSize: CGSize {
+        get { self[PanelSizeKey.self] }
+        set { self[PanelSizeKey.self] = newValue }
+    }
+}
+
 // The pieces every panel is made of, so that Settings, History, Downloads,
 // Passwords and Bookmarks read as one kind of thing: the same plate, the
 // same title with the cross beside it, the same hairline cards with a rule
@@ -9,6 +20,7 @@ import SwiftUI
 /// The plate: a rounded card with a title, a cross, whatever the panel is
 /// about, and — when there is one — a foot below a hairline.
 struct Plate<Content: View, Foot: View>: View {
+    @Environment(\.panelSize) private var available
     let title: String
     var width: CGFloat = 560
     let close: () -> Void
@@ -55,7 +67,8 @@ struct Plate<Content: View, Foot: View>: View {
                 Color.clear.frame(height: 20)
             }
         }
-        .frame(width: width, alignment: .leading)
+        .frame(width: min(width, available.width), alignment: .leading)
+        .frame(maxHeight: available.height)
         .background(Palette.ground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(

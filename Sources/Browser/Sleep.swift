@@ -66,7 +66,9 @@ extension Browser {
     /// `parking` is a profile being switched away from: on screen and
     /// pinned no longer mean anything there, and everything else still does.
     func awake(because tab: Tab, parking: Bool = false) -> String? {
-        if !parking, tab.id == activeID { return "on screen" }
+        guard self.tab(tab.id) === tab else { return "closed" }
+        if tab.id == activeID { return "on screen" }
+        if parking, tabs.contains(where: { $0.id == tab.id }) { return "profile is back on screen" }
         if !parking, tab.pin != nil { return "pinned" }
         if tab.bench { return "a bench tab" }
         if tab.isBlank { return "blank" }
@@ -90,8 +92,19 @@ extension Browser {
             done?(reason)
             return
         }
+        let revision = profileRevision
+        let touched = tab.touched
+        let navigation = tab.navigationID
+        // Every asynchronous step must still belong to the same visit and
+        // profile switch. A returned profile must never lose its live view.
+        let current: () -> Bool = { [weak self, weak tab, weak page = tab.built] in
+            guard let self, let tab, let page else { return false }
+            return self.profileRevision == revision && tab.touched == touched
+                && tab.navigationID == navigation && tab.built === page
+        }
         tab.unsaved { [weak self, weak tab] typed in
             guard let self, let tab else { return }
+            guard current() else { done?("page changed"); return }
             if typed {
                 done?("holding something typed")
                 return
@@ -102,6 +115,7 @@ extension Browser {
             }
             tab.snapshot { [weak self, weak tab] picture in
                 guard let self, let tab else { return }
+                guard current() else { done?("page changed"); return }
                 if let reason = self.awake(because: tab, parking: parking) {
                     done?(reason)
                     return

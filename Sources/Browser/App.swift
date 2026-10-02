@@ -346,7 +346,7 @@ struct ContentView: View {
 
                     // One stage, always.
                     if let tab = browser.active {
-                        Page(tab: tab)
+                        Page(tab: tab, retry: { browser.retrySlowPage(tab, resetWorker: $0) })
                             .overlay(alignment: .topTrailing) {
                                 if browser.finding {
                                     FindBar(browser: browser)
@@ -453,39 +453,44 @@ struct ContentView: View {
     /// The panels. All the same kind of thing, so they are built the same way.
     @ViewBuilder
     private var panels: some View {
-        if browser.recalling {
+        if browser.frontPanel == .history {
             sheet { HistoryPanel(browser: browser) } close: { browser.recalling = false }
         }
-        if browser.hoarding {
+        if browser.frontPanel == .downloads {
             sheet { DownloadsPanel(browser: browser, loot: browser.loot) }
                 close: { browser.hoarding = false }
         }
-        if browser.tuning {
+        if browser.frontPanel == .settings {
             sheet { SettingsPanel(browser: browser, prefs: browser.prefs) }
                 close: { browser.tuning = false }
         }
-        if browser.bookmarking {
+        if browser.frontPanel == .bookmarks {
             sheet { BookmarksPanel(browser: browser, bookmarks: browser.bookmarks) }
                 close: { browser.bookmarking = false }
         }
-        if browser.welcoming {
+        if browser.frontPanel == .welcome {
             WelcomePanel(browser: browser, prefs: browser.prefs)
                 .ignoresSafeArea()
         }
-        if browser.managing {
+        if browser.frontPanel == .passwords {
             sheet { PasswordsPanel(browser: browser) } close: { browser.managing = false }
         }
-        if browser.reviewing {
+        if browser.frontPanel == .hidden {
             // No dimming for this one: the whole point is to keep looking at
             // the page while the list offers to put things back on it.
-            ZStack(alignment: .topTrailing) {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { browser.reviewing = false }
-                HiddenPanel(browser: browser)
-                    .padding(.top, Metrics.strip + 8)
-                    .padding(.trailing, 14)
-                    .transition(.scale(scale: 0.97, anchor: .topTrailing).combined(with: .opacity))
+            GeometryReader { geometry in
+                ZStack(alignment: .topTrailing) {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { browser.reviewing = false }
+                    HiddenPanel(browser: browser)
+                        .environment(\.panelSize, CGSize(
+                            width: max(0, geometry.size.width - 28),
+                            height: max(0, geometry.size.height - Metrics.strip - 22)))
+                        .padding(.top, Metrics.strip + 8)
+                        .padding(.trailing, 14)
+                        .transition(.scale(scale: 0.97, anchor: .topTrailing).combined(with: .opacity))
+                }
             }
             .ignoresSafeArea()
             .transition(.opacity)
@@ -515,6 +520,7 @@ struct ContentView: View {
                 resting?.isHidden = true
             }
             .onChange(of: browser.fieldShowing) { _, showing in
+                guard browser.frontPanel == nil else { return }
                 if showing {
                     DispatchQueue.main.async { browser.askFocus() }
                 } else {
@@ -522,6 +528,10 @@ struct ContentView: View {
                 }
             }
             .onChange(of: browser.activeID) { _, _ in handBack() }
+            .onChange(of: browser.frontPanel) { _, panel in
+                guard panel == nil else { return }
+                if browser.fieldShowing { browser.askFocus() } else { handBack() }
+            }
             .animation(Motion.settle, value: browser.recalling)
             .animation(Motion.settle, value: browser.hoarding)
             .animation(Motion.settle, value: browser.tuning)
@@ -546,9 +556,10 @@ struct ContentView: View {
     /// WebAuthn refuses to run on a document that isn't focused, and so do a
     /// number of paste and shortcut handlers pages install for themselves.
     private func handBack() {
-        guard !browser.fieldShowing, browser.editingTab == nil else { return }
+        guard browser.frontPanel == nil, !browser.fieldShowing, browser.editingTab == nil else { return }
         DispatchQueue.main.async {
-            guard let web = browser.active?.web, let window = web.window else { return }
+            guard browser.frontPanel == nil, !browser.fieldShowing, browser.editingTab == nil,
+                  let web = browser.active?.built, let window = web.window else { return }
             window.makeFirstResponder(web)
         }
     }
@@ -664,15 +675,21 @@ struct ContentView: View {
     /// page, so they read as one kind of thing.
     @ViewBuilder
     private func sheet<Panel: View>(
-        @ViewBuilder _ panel: () -> Panel,
+        @ViewBuilder _ panel: @escaping () -> Panel,
         close: @escaping () -> Void
     ) -> some View {
-        ZStack {
-            Color.black.opacity(0.10)
-                .ignoresSafeArea()
-                .onTapGesture(perform: close)
-            panel()
-                .transition(.scale(scale: 0.97).combined(with: .opacity))
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.opacity(0.10)
+                    .ignoresSafeArea()
+                    .onTapGesture(perform: close)
+                panel()
+                    .environment(\.panelSize, CGSize(
+                        width: max(0, geometry.size.width - 32),
+                        height: max(0, geometry.size.height - 32)))
+                    .transition(.scale(scale: 0.97).combined(with: .opacity))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .transition(.opacity)
     }
@@ -814,24 +831,13 @@ struct ContentView: View {
         // Escape puts the page back. On a blank tab there is no page to put
         // back, so it belongs to whatever else wants it.
         if event.keyCode == 53 {
+            if browser.dismissTopPanel() { return true }
             if browser.editingTab != nil {
                 browser.cancelTabEdit()
                 return true
             }
             if !browser.chosen.isEmpty {
                 browser.unchoose()
-                return true
-            }
-            if browser.tuning {
-                browser.tuning = false
-                return true
-            }
-            if browser.bookmarking {
-                browser.bookmarking = false
-                return true
-            }
-            if browser.managing {
-                browser.managing = false
                 return true
             }
             if browser.suggesting != nil {
@@ -844,10 +850,6 @@ struct ContentView: View {
             }
             if browser.veiling {
                 browser.toggleHiding()
-                return true
-            }
-            if browser.reviewing {
-                browser.reviewing = false
                 return true
             }
             if browser.finding {
@@ -869,6 +871,7 @@ struct ContentView: View {
         // address is being typed is it the field's — it walks the list
         // under the field, or takes the ending the field is offering.
         if event.keyCode == 48, flags.isSubset(of: .shift) {
+            guard browser.frontPanel == nil else { return false }
             if browser.editingTab != nil { return true }
             guard browser.fieldShowing else { return false }
             if !browser.offers.isEmpty {

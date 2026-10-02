@@ -6,6 +6,7 @@ import SwiftUI
 /// hairline as the rest of the app; the same pill for the page you are on
 /// as for the tab you are on.
 struct SettingsPanel: View {
+    @Environment(\.panelSize) private var available
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
 
@@ -52,11 +53,12 @@ struct SettingsPanel: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            pages
+            ScrollView { pages }
+                .frame(width: SettingsPanel.rail)
             Rectangle().fill(Palette.hairline).frame(width: 1)
             content
         }
-        .frame(width: SettingsPanel.width, height: SettingsPanel.height)
+        .frame(width: min(SettingsPanel.width, available.width), height: min(SettingsPanel.height, available.height))
         .background(Palette.ground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)

@@ -12,29 +12,50 @@ struct Omnibox: View {
 
     @State private var shake: CGFloat = 0
     @State private var refused = false
+    @State private var listHeight: CGFloat = 0
 
     var body: some View {
-        ZStack {
-            if over {
-                // The page is still there, just out of the way.
-                Rectangle()
-                    .fill(Palette.ground.opacity(0.74))
-                    .ignoresSafeArea()
-                    .onTapGesture { browser.dismiss() }
-                    .transition(.opacity)
+        GeometryReader { geometry in
+            ZStack {
+                if over {
+                    Rectangle()
+                        .fill(Palette.ground.opacity(0.74))
+                        .ignoresSafeArea()
+                        .onTapGesture { browser.dismiss() }
+                        .transition(.opacity)
+                }
+                VStack(spacing: 8) {
+                    field
+                    if !browser.offers.isEmpty {
+                        ScrollViewReader { reader in
+                            ScrollView {
+                                list.background(GeometryReader { size in
+                                    Color.clear.preference(key: OfferHeight.self, value: size.size.height)
+                                })
+                            }
+                            .frame(height: min(listHeight, max(60, geometry.size.height - 130)))
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                            .onPreferenceChange(OfferHeight.self) { listHeight = $0 }
+                            .onChange(of: browser.picked) { _, picked in
+                                if let picked, browser.offers.indices.contains(picked) {
+                                    reader.scrollTo(browser.offers[picked].id)
+                                }
+                            }
+                        }
+                    }
+                }
+                .frame(width: min(Metrics.fieldWidth, max(120, geometry.size.width - 32)))
+                .padding(.bottom, min(60, geometry.size.height * 0.08))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .animation(Motion.settle, value: browser.offers)
+                .animation(Motion.settle, value: refused)
             }
-
-            VStack(spacing: 8) {
-                field
-                if !browser.offers.isEmpty { list }
-            }
-            .frame(width: Metrics.fieldWidth)
-            // Lifted a little above centre: dead centre reads as low, because
-            // the strip at the top isn't part of what the eye is measuring.
-            .padding(.bottom, 60)
-            .animation(Motion.settle, value: browser.offers)
-            .animation(Motion.settle, value: refused)
         }
+    }
+
+    private struct OfferHeight: PreferenceKey {
+        static let defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
     }
 
     private var field: some View {
@@ -95,6 +116,7 @@ struct Omnibox: View {
                         .padding(.bottom, 3)
                 }
                 Row(offer: offer, picked: browser.picked == index)
+                    .id(offer.id)
                     .contentShape(Rectangle())
                     .onTapGesture { browser.take(offer) }
             }
