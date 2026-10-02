@@ -197,8 +197,8 @@ final class Favicons {
 
     /// Whether a browser would send this cookie to this address: its domain
     /// matches the host, its path is under the address's, and a secure one
-    /// only over https.
-    private static func cookie(_ cookie: HTTPCookie, goesTo url: URL) -> Bool {
+    /// only over https. Copying an image asks the same question.
+    static func cookie(_ cookie: HTTPCookie, goesTo url: URL) -> Bool {
         guard let host = url.host()?.lowercased() else { return false }
         if cookie.isSecure, url.scheme != "https" { return false }
         let domain = cookie.domain.lowercased()
