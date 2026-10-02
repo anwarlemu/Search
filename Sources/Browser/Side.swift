@@ -69,7 +69,8 @@ struct SideBar: View {
                     // row to put them at in this mode.
                     HStack(spacing: 0) {
                         Color.clear.frame(width: Metrics.sideLights)
-                        Helm(browser: browser)
+                        Helm(browser: browser, tab: browser.active)
+                            .equatable()
                         Spacer(minLength: 0)
                     }
                     .frame(height: Metrics.strip)
@@ -252,13 +253,16 @@ struct SideBar: View {
                 let held = pinDragging == tab.id
                 PinSquare(
                     browser: browser,
-                    prefs: prefs,
                     tab: tab,
                     live: tab.id == browser.activeID,
+                    lettering: browser.editingPin == tab.id,
+                    chosen: browser.chosen.contains(tab.id),
+                    icons: prefs.glyph == .icons,
                     pill: pill,
                     width: width,
                     height: height
                 )
+                .equatable()
                 .offset(pinOffset(held: held, index: index, columns: cols))
                 .zIndex(held ? 1 : 0)
                 .shadow(color: .black.opacity(held ? 0.16 : 0), radius: 10, y: 3)
@@ -344,12 +348,15 @@ struct SideBar: View {
                 let held = dragging == tab.id
                 SideRow(
                     browser: browser,
-                    prefs: prefs,
                     tab: tab,
                     live: tab.id == browser.activeID,
-                    pill: pill,
-                    close: { browser.close(tab) }
+                    editing: browser.editingTab == tab.id,
+                    chosen: browser.chosen.contains(tab.id),
+                    icons: prefs.glyph == .icons,
+                    refusals: browser.refusals,
+                    pill: pill
                 )
+                .equatable()
                 .offset(y: held ? travel : aside(index, step: step))
                 .zIndex(held ? 1 : 0)
                 .shadow(color: .black.opacity(held ? 0.14 : 0), radius: 12, y: 4)
@@ -408,7 +415,9 @@ struct SideBar: View {
                 .popover(isPresented: $browser.bookmarksOpen, arrowEdge: .trailing) {
                     BookmarksDropdown(browser: browser, bookmarks: browser.bookmarks)
                 }
-            ProfileDoor(browser: browser)
+            ProfileDoor(browser: browser, names: browser.profileNames, profile: browser.profile,
+                        key: browser.keys.chord(for: .profileNumber)?.label)
+                .equatable()
                 .padding(.leading, 4)
             Spacer(minLength: 0)
         }
@@ -421,14 +430,24 @@ struct SideBar: View {
 /// A pinned tab as a cell in the block at the top of the column — as wide as
 /// its row asks for, but never taller than the classic square, so a row with
 /// room to spare turns into a wide, short button rather than a bigger icon.
-private struct PinSquare: View {
-    @ObservedObject var browser: Browser
-    @ObservedObject var prefs: Preferences
+private struct PinSquare: View, Equatable {
+    // Watching its own tab and a few plain values, not the whole browser —
+    // see TabPill (2 Oct 2026).
+    let browser: Browser
     @ObservedObject var tab: Tab
     let live: Bool
+    let lettering: Bool
+    let chosen: Bool
+    let icons: Bool
     let pill: Namespace.ID
     var width: CGFloat = 42
     var height: CGFloat = 42
+
+    static func == (a: PinSquare, b: PinSquare) -> Bool {
+        a.browser === b.browser && a.tab === b.tab && a.live == b.live && a.lettering == b.lettering
+            && a.chosen == b.chosen && a.icons == b.icons && a.pill == b.pill
+            && a.width == b.width && a.height == b.height
+    }
 
     @State private var hovering = false
 
@@ -439,9 +458,9 @@ private struct PinSquare: View {
 
     var body: some View {
         Group {
-            if browser.editingPin == tab.id {
+            if lettering {
                 PinField(browser: browser, tab: tab)
-            } else if prefs.glyph == .icons, let icon = tab.icon {
+            } else if icons, let icon = tab.icon {
                 Mark(icon: icon, letter: tab.pin ?? "", size: scale * 18 / 42, dim: tab.asleep)
             } else {
                 Text(tab.pin ?? "")
@@ -461,7 +480,7 @@ private struct PinSquare: View {
                     .fill(hovering ? Palette.hover : Palette.wash.opacity(0.55))
             }
         }
-        .overlay { if browser.chosen.contains(tab.id) { Outline(radius: scale * 10 / 42) } }
+        .overlay { if chosen { Outline(radius: scale * 10 / 42) } }
         .contentShape(RoundedRectangle(cornerRadius: scale * 10 / 42, style: .continuous))
         .modifier(OneClick(double: live) {
             if browser.choose(tab) { return }
@@ -479,18 +498,27 @@ private struct PinSquare: View {
 }
 
 /// One tab, as a line in the column.
-private struct SideRow: View {
-    @ObservedObject var browser: Browser
-    @ObservedObject var prefs: Preferences
+private struct SideRow: View, Equatable {
+    // Watching its own tab and a few plain values, not the whole browser —
+    // see TabPill (2 Oct 2026).
+    let browser: Browser
     @ObservedObject var tab: Tab
     let live: Bool
+    let editing: Bool
+    let chosen: Bool
+    let icons: Bool
+    let refusals: Int
     let pill: Namespace.ID
-    let close: () -> Void
+
+    static func == (a: SideRow, b: SideRow) -> Bool {
+        a.browser === b.browser && a.tab === b.tab && a.live == b.live && a.editing == b.editing
+            && a.chosen == b.chosen && a.icons == b.icons && a.refusals == b.refusals && a.pill == b.pill
+    }
 
     @State private var hovering = false
     @State private var shake: CGFloat = 0
 
-    private var editing: Bool { browser.editingTab == tab.id }
+    private func close() { browser.close(tab) }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -498,7 +526,7 @@ private struct SideRow: View {
                 TabAddressField(browser: browser)
                     .frame(height: 18)
             } else {
-                if prefs.glyph == .icons, !tab.isBlank {
+                if icons, !tab.isBlank {
                     Mark(icon: tab.icon, letter: tab.monogram, size: 16)
                 }
                 if tab.bench {
@@ -578,7 +606,7 @@ private struct SideRow: View {
         .contextMenu { TabMenu(browser: browser, tab: tab, close: close) }
         .animation(Motion.quick, value: hovering)
         .animation(Motion.glide, value: editing)
-        .onChange(of: browser.refusals) { _, _ in
+        .onChange(of: refusals) { _, _ in
             guard editing else { return }
             shake = 0
             withAnimation(.easeOut(duration: 0.5)) { shake = 1 }
@@ -605,9 +633,6 @@ private struct SideRow: View {
                 .fill(Palette.hover)
         }
     }
-
-    /// Picked out with ⌘ or ⇧, to be moved or closed with the others.
-    private var chosen: Bool { browser.chosen.contains(tab.id) }
 
     private var colour: Color {
         if live { return Palette.ink }

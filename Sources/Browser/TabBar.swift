@@ -81,10 +81,13 @@ struct TabBar: View {
                     // Back, forward, reload, and the bookmarks, at the far end
                     // of the row. The dropdown hangs from the last one.
                     HStack(spacing: Metrics.tabGap) {
-                        ProfileDoor(browser: browser)
+                        ProfileDoor(browser: browser, names: browser.profileNames, profile: browser.profile,
+                                    key: browser.keys.chord(for: .profileNumber)?.label)
+                            .equatable()
                             .padding(.trailing, 6)
                         ExtensionSlot()
-                        Helm(browser: browser)
+                        Helm(browser: browser, tab: browser.active)
+                            .equatable()
                             .padding(.trailing, 8)
                         Door(icon: "bookmark", help: "Bookmarks") { browser.bookmarksOpen.toggle() }
                             .popover(isPresented: $browser.bookmarksOpen, arrowEdge: .bottom) {
@@ -213,16 +216,21 @@ private struct TabRun: View {
                         // among titles: each has its own stride.
                         let step = (tab.pin != nil ? Metrics.pinWidth : width) + Metrics.tabGap
                         let held = dragging == tab.id
+                        let editing = browser.editingTab == tab.id
                         TabPill(
                             browser: browser,
-                            prefs: browser.prefs,
                             tab: tab,
                             live: tab.id == browser.activeID,
+                            editing: editing,
+                            lettering: browser.editingPin == tab.id,
+                            chosen: browser.chosen.contains(tab.id),
+                            icons: browser.prefs.glyph == .icons,
+                            refusals: browser.refusals,
                             width: width,
                             room: room,
-                            pill: pill,
-                            close: { browser.close(tab) }
+                            pill: pill
                         )
+                        .equatable()
                         // The held pill keeps up with the hand; the others make
                         // way for it.
                         .offset(x: held ? travel : aside(index))
@@ -339,11 +347,17 @@ private struct TabRun: View {
 /// there is anywhere to go back to is the tab's to say, and it changes with
 /// every page. Used here and, beside the traffic lights instead of at the
 /// far end of the row, in the sidebar.
-struct Helm: View {
-    @ObservedObject var browser: Browser
+struct Helm: View, Equatable {
+    let browser: Browser
+    /// The live tab, handed in rather than read off the browser: the doors
+    /// then redraw when the tab changes and not with every keystroke in the
+    /// address field (2 Oct 2026).
+    let tab: Tab?
+
+    static func == (a: Helm, b: Helm) -> Bool { a.browser === b.browser && a.tab === b.tab }
 
     var body: some View {
-        if let tab = browser.active {
+        if let tab {
             Wheel(browser: browser, tab: tab)
         } else {
             // Nowhere to go and nothing to reload: the doors stay in place,
@@ -389,21 +403,37 @@ struct Helm: View {
     }
 }
 
-private struct TabPill: View {
-    @ObservedObject var browser: Browser
-    @ObservedObject var prefs: Preferences
+/// One tab in the row. It watches its own tab and takes the few things it
+/// needs from the browser as plain values, so it is drawn again when one of
+/// those changes and not when anything in the browser does: with every tab
+/// watching the whole browser, a keystroke in the address field redrew the
+/// row entire (2 Oct 2026).
+private struct TabPill: View, Equatable {
+    let browser: Browser
     @ObservedObject var tab: Tab
     let live: Bool
+    /// Its address is being typed over; its letter is being typed over.
+    let editing: Bool
+    let lettering: Bool
+    let chosen: Bool
+    let icons: Bool
+    /// The browser's count of refused addresses, for the shake.
+    let refusals: Int
     let width: CGFloat
     /// How much of the strip there is, for the field that grows over it.
     let room: CGFloat
     let pill: Namespace.ID
-    let close: () -> Void
+
+    static func == (a: TabPill, b: TabPill) -> Bool {
+        a.browser === b.browser && a.tab === b.tab && a.live == b.live && a.editing == b.editing
+            && a.lettering == b.lettering && a.chosen == b.chosen && a.icons == b.icons
+            && a.refusals == b.refusals && a.width == b.width && a.room == b.room && a.pill == b.pill
+    }
 
     @State private var hovering = false
     @State private var shake: CGFloat = 0
 
-    private var editing: Bool { browser.editingTab == tab.id }
+    private func close() { browser.close(tab) }
     private var pinned: Bool { tab.pin != nil && !editing }
     /// Too narrow for a title: the site's mark alone, the title in the
     /// tooltip, and ⌘W or the menu to close it — a cross on something this
@@ -421,9 +451,9 @@ private struct TabPill: View {
         Group {
             if pinned {
                 Group {
-                    if browser.editingPin == tab.id {
+                    if lettering {
                         PinField(browser: browser, tab: tab)
-                    } else if prefs.glyph == .icons, let icon = tab.icon {
+                    } else if icons, let icon = tab.icon {
                         Mark(icon: icon, letter: tab.pin ?? "", size: 16, dim: tab.asleep)
                     } else {
                         Text(tab.pin ?? "")
@@ -476,7 +506,7 @@ private struct TabPill: View {
         .animation(Motion.quick, value: hovering)
         .animation(Motion.glide, value: editing)
         .animation(Motion.glide, value: tab.pin)
-        .onChange(of: browser.refusals) { _, _ in
+        .onChange(of: refusals) { _, _ in
             guard editing else { return }
             shake = 0
             withAnimation(.easeOut(duration: 0.5)) { shake = 1 }
@@ -492,7 +522,7 @@ private struct TabPill: View {
                 if tab.loading {
                     Ring()
                 } else {
-                    Mark(icon: prefs.glyph == .icons ? tab.icon : nil, letter: tab.monogram, size: 15, dim: tab.asleep)
+                    Mark(icon: icons ? tab.icon : nil, letter: tab.monogram, size: 15, dim: tab.asleep)
                 }
             }
             .frame(width: 16, height: 16)
@@ -509,7 +539,7 @@ private struct TabPill: View {
                 TabAddressField(browser: browser)
                     .frame(height: 16)
             } else {
-                if prefs.glyph == .icons, !tab.isBlank {
+                if icons, !tab.isBlank {
                     Mark(icon: tab.icon, letter: tab.monogram, size: 15)
                 }
                 if tab.bench {
@@ -583,9 +613,6 @@ private struct TabPill: View {
         .padding(.vertical, 6)
         .frame(width: span, alignment: .leading)
     }
-
-    /// Picked out with ⌘ or ⇧, to be moved or closed with the others.
-    private var chosen: Bool { browser.chosen.contains(tab.id) }
 
     @ViewBuilder
     private var ground: some View {
