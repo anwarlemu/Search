@@ -16,7 +16,11 @@ struct Page: View {
         ZStack {
             // A tab put down with ⌘W has no view, and asking for one here
             // would build an empty one a frame before the stage moves on.
-            WebStage(page: tab.isBlank || tab.asleep ? nil : tab.web)
+            // Nor is the page wanted while it is out in the little window:
+            // handed over anyway, the stage took it back on its next layout
+            // — a resize was enough — and the little window, finding its
+            // page gone, closed itself (2 Oct 2026).
+            WebStage(page: tab.isBlank || tab.asleep || tab.floating ? nil : tab.web)
 
             if let cover = tab.cover {
                 // The page as it was left, while it is rebuilt underneath —
