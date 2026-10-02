@@ -528,8 +528,11 @@ final class Browser: NSObject, ObservableObject {
         guard let tab = tabs.first(where: { $0.id == suggesting?.tab }) ?? active else { return }
         suggesting = nil
         pickedInto = tab.id
-        tab.fill(user: login.user, password: login.password) { [weak self] worked in
-            if !worked { self?.announce("Couldn't find the sign-in fields anymore") }
+        Vault.off({ Vault.secret(of: login) }) { [weak tab] password in
+            guard let tab, let password else { return }
+            tab.fill(user: login.user, password: password) { [weak self] worked in
+                if !worked { self?.announce("Couldn't find the sign-in fields anymore") }
+            }
         }
         Vault.queue.async { Vault.touch(login) }
     }
@@ -588,15 +591,18 @@ final class Browser: NSObject, ObservableObject {
     func copy(_ login: Login) {
         Vault.prove("copy the password for \(login.host)") { [weak self] ok in
             guard ok else { return }
-            let board = NSPasteboard.general
-            board.clearContents()
-            board.setString(login.password, forType: .string)
-            let put = board.changeCount
-            DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
-                guard board.changeCount == put else { return }
+            Vault.off({ Vault.secret(of: login) }) { [weak self] password in
+                guard let password else { return }
+                let board = NSPasteboard.general
                 board.clearContents()
+                board.setString(password, forType: .string)
+                let put = board.changeCount
+                DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+                    guard board.changeCount == put else { return }
+                    board.clearContents()
+                }
+                self?.announce("Password copied")
             }
-            self?.announce("Password copied")
         }
     }
 
@@ -1787,16 +1793,18 @@ final class Browser: NSObject, ObservableObject {
             // A password manager extension that asked Chrome's way to do the
             // saving itself.
             if #available(macOS 15.4, *), Extensions.shared.passwordSavingTakenBy != nil { return }
-            Vault.off({ Vault.logins(for: host) }) { [weak self] known in
-                guard let self else { return }
-                // Nothing to ask about one that is already known.
-                if let same = known.first(where: { $0.user == user && $0.password == password }) {
-                    Vault.queue.async { Vault.touch(same) }
-                    return
-                }
+            // Only the account with this name is read, and only to tell a
+            // sign-in that is already known from one whose password changed.
+            Vault.off({ () -> (known: Bool, unchanged: Bool) in
+                guard let same = Vault.logins(for: host).first(where: { $0.user == user }) else { return (false, false) }
+                guard Vault.secret(of: same) == password else { return (true, false) }
+                Vault.touch(same)
+                return (true, true)
+            }) { [weak self] found in
+                guard let self, !found.unchanged else { return }
                 let offer = Offer(
                     login: Login(host: host, user: user, password: password, used: nil),
-                    changed: known.contains { $0.user == user }
+                    changed: found.known
                 )
                 guard offering != offer else { return }
                 offering = offer

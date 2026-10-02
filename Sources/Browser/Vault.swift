@@ -134,12 +134,22 @@ enum Vault {
         return nil
     }
 
+    /// A row as a login, with no secret in it: `secret(of:)` reads that,
+    /// at the moment it is used. Reading it here meant every list — five
+    /// accounts under a sign-in box, every one in Settings — put macOS's
+    /// "wants to use your confidential information" up once per item for
+    /// an app it hadn't seen before, which a rebuilt app is (2 Oct 2026).
     private static func login(from row: [String: Any]) -> Login? {
         guard let host = row[kSecAttrServer as String] as? String,
-              let user = row[kSecAttrAccount as String] as? String,
-              let password = secret(host: host, user: user)
+              let user = row[kSecAttrAccount as String] as? String
         else { return nil }
-        return Login(host: host, user: user, password: password, used: used(in: row))
+        return Login(host: host, user: user, password: "", used: used(in: row))
+    }
+
+    /// The password itself, read now. The one call that can put up the
+    /// keychain's question, so it is made only for an account being used.
+    static func secret(of login: Login) -> String? {
+        login.password.isEmpty ? secret(host: login.host, user: login.user) : login.password
     }
 
     /// The keychain has no "last used" of its own; it rides in the comment.
