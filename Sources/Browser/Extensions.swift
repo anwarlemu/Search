@@ -326,7 +326,12 @@ final class Extensions: NSObject, ObservableObject {
             browser?.announce("Couldn't copy the extension")
             return
         }
-        Task { try? await admit(staged, as: id, fromStore: false, finalFolder: Extensions.folder(for: id), confirm: confirm || !Store.testing, source: source) }
+        Task {
+            // A manifest WebKit won't read was refused in silence; said now,
+            // in WebKit's words, as a store install's refusal is (2 Oct 2026).
+            do { try await admit(staged, as: id, fromStore: false, finalFolder: Extensions.folder(for: id), confirm: confirm || !Store.testing, source: source) }
+            catch { browser?.announce("Couldn't load \(source.lastPathComponent): \(error.localizedDescription)") }
+        }
     }
 
     /// Takes the extension up again — the way Chrome's reload button does
