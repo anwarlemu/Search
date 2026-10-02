@@ -122,6 +122,17 @@ final class Float {
         panel.orderFrontRegardless()
         self.panel = panel
 
+        // The window takes the video's own shape once the page says what it
+        // is; 16:9 until then. A film in a 16:9 window is fine; a portrait
+        // clip or a 4:3 call in one was two bars and a small picture
+        // (2 Oct 2026).
+        (page as? WKWebView)?.evaluateJavaScript(Isolate.shape) { [weak self] answer, _ in
+            MainActor.assumeIsolated {
+                guard let pair = answer as? [Double], pair.count == 2 else { return }
+                self?.shape(width: pair[0], height: pair[1])
+            }
+        }
+
         ticker = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
@@ -142,6 +153,17 @@ final class Float {
                 if self.controls?.near == true { self.tick() }
             }
         }
+    }
+
+    /// The window reshaped to the video, keeping its width and its place.
+    private func shape(width: Double, height: Double) {
+        guard let panel, width > 0, height > 0 else { return }
+        panel.aspectRatio = NSSize(width: width, height: height)
+        let was = panel.frame
+        let tall = was.width * height / width
+        guard abs(tall - was.height) > 1 else { return }
+        let screen = NSScreen.main?.visibleFrame ?? was
+        panel.setFrame(Float.fit(NSRect(x: was.minX, y: was.minY, width: was.width, height: tall), on: screen), display: true)
     }
 
     /// Asks the page where it is, for the line and the pause button.
@@ -666,6 +688,16 @@ enum Isolate {
         })();
         """
     }
+
+    /// The picture's own width and height in pixels, or two noughts.
+    static let shape = """
+    (function () {
+      var video = document.querySelector('[data-office-float]')
+        || document.querySelector('video');
+      if (!video || !video.videoWidth || !video.videoHeight) return [0, 0];
+      return [video.videoWidth, video.videoHeight];
+    })();
+    """
 
     /// How far through, and whether it is running.
     static let where_ = """
