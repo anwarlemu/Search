@@ -52,10 +52,10 @@ struct BrowserApp: App {
                 Button("Find on Page…") { current.openFind() }
                     .keyboardShortcut(current.keys.menu(.findOnPage))
                     .disabled(current.active?.isBlank ?? true)
-                Button("Find Next") { current.look(forward: true) }
+                Button("Find Next") { FindBar.look(current, forward: true) }
                     .keyboardShortcut(current.keys.menu(.findNext))
                     .disabled(!current.finding)
-                Button("Find Previous") { current.look(forward: false) }
+                Button("Find Previous") { FindBar.look(current, forward: false) }
                     .keyboardShortcut(current.keys.menu(.findPrevious))
                     .disabled(!current.finding)
             }
@@ -1004,8 +1004,8 @@ struct ContentView: View {
         case .reload: browser.reload()
         case .hardReload: browser.hardReload()
         case .findOnPage: browser.openFind()
-        case .findNext: browser.look(forward: true)
-        case .findPrevious: browser.look(forward: false)
+        case .findNext: FindBar.look(browser, forward: true)
+        case .findPrevious: FindBar.look(browser, forward: false)
         case .print: browser.printPage()
         case .copyAddress: browser.copyAddress()
         case .pasteAndGo: browser.pasteAndGo()
