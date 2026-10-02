@@ -119,21 +119,38 @@ struct SideBar: View {
             .contentShape(Rectangle())
             .onHover { over in
                 onEdge = over
-                if over { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                cursor(over || grabbed != nil)
             }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
                         if grabbed == nil { grabbed = prefs.sideWidth }
+                        cursor(true)
                         let wanted = (grabbed ?? prefs.sideWidth) + value.translation.width
                         prefs.sideWidth = min(Metrics.sideMax, max(Metrics.sideMin, wanted))
                     }
-                    .onEnded { _ in grabbed = nil }
+                    .onEnded { _ in
+                        grabbed = nil
+                        cursor(onEdge)
+                    }
             )
             .modifier(OneClick(double: true) {
                 withAnimation(Motion.settle) { prefs.sideWidth = Metrics.side }
             })
             .animation(Motion.quick, value: onEdge)
+            .onDisappear { cursor(false) }
+    }
+
+    /// Whether the resize cursor is up. Pushed and popped by the hover
+    /// alone, a pull that ran ahead of the nine-point edge lost the cursor
+    /// mid-drag, and a column put away with the pointer on its edge left
+    /// it up for good (2 Oct 2026).
+    @State private var arrows = false
+
+    private func cursor(_ wanted: Bool) {
+        guard wanted != arrows else { return }
+        arrows = wanted
+        if wanted { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
     }
 
     /// Where the rows stop and the window's own drag area starts. Added up
