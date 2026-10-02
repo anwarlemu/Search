@@ -178,6 +178,7 @@ final class Extensions: NSObject, ObservableObject {
             adapters[id] = nil
             watching[id] = nil
             forgetIcons(in: id)
+            ExtensionShims.forgetPopups(in: id)
         }
         for tab in now where !order.contains(tab.id) {
             controller.didOpenTab(adapter(for: tab))

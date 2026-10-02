@@ -2411,6 +2411,12 @@ enum ExtensionShims {
     /// Popups extensions set for their buttons: per tab, or "*" for all.
     static var popups: [String: [String: String]] = [:]
 
+    /// A closed tab's go with it; they were kept for good (2 Oct 2026).
+    static func forgetPopups(in tab: Tab.ID) {
+        let key = tab.uuidString
+        for id in popups.keys where popups[id]?[key] != nil { popups[id]?[key] = nil }
+    }
+
     /// Keep-awake assertions, one per extension that asked.
     static var awake: [String: IOPMAssertionID] = [:]
 
