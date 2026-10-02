@@ -387,6 +387,8 @@ final class Bench {
                 "profiles": browser.profileNames,
                 "profile": browser.profile,
                 "chosen": browser.chosenTabs.map(Bench.short),
+                "filling": browser.filling.map { "\($0.kinds.count) of \($0.total) · \($0.yours) yours" } ?? "",
+                "offers": browser.offers.map { ($0.section.map { $0 + ": " } ?? "") + $0.key },
                 "modal": NSApp.modalWindow.map { "\(type(of: $0)) “\($0.title)”" } ?? "",
                 "look": browser.prefs.look.rawValue,
                 "appearance": NSApp.appearance?.name.rawValue ?? "system",
@@ -693,6 +695,7 @@ final class Bench {
             if request["floatClose"] as? Bool == true { browser.floater.onClose?() }
             if let seconds = request["floatSeek"] as? Double { browser.floater.onSeek?(seconds) }
             if let on = request["floatCaptions"] as? Bool { browser.floater.onCaptions?(on) }
+            if request["fillForm"] as? Bool == true { browser.fillForm() }
             // The tab menu's Move to Profile, for one tab.
             if let index = request["moveTo"] as? Int, let tab = find(request, in: browser) { browser.move([tab], toProfile: index) }
             if request["closePrivate"] as? Bool == true {

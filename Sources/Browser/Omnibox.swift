@@ -82,9 +82,35 @@ struct Omnibox: View {
     private var list: some View {
         VStack(spacing: 0) {
             ForEach(Array(browser.offers.enumerated()), id: \.element.id) { index, offer in
+                // On an empty tab the rows come in sections — see
+                // Fresh.swift — each named once, over its first row.
+                if let section = offer.section,
+                   index == 0 || browser.offers[index - 1].section != section {
+                    Text(section)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(Palette.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.top, index == 0 ? 6 : 10)
+                        .padding(.bottom, 3)
+                }
                 Row(offer: offer, picked: browser.picked == index)
                     .contentShape(Rectangle())
                     .onTapGesture { browser.take(offer) }
+            }
+            if browser.offers.contains(where: { $0.section != nil }) {
+                HStack(spacing: 14) {
+                    Spacer(minLength: 0)
+                    Text("Open ⏎")
+                    if let chord = browser.keys.chord(for: .switchTab)?.label {
+                        Text("Tabs \(chord)")
+                    }
+                }
+                .font(.system(size: 10.5))
+                .foregroundStyle(Palette.faint)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
             }
         }
         .padding(6)
@@ -107,34 +133,52 @@ struct Omnibox: View {
 
         var body: some View {
             HStack(spacing: 10) {
+                lead
                 switch offer.kind {
-                case .search:
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Palette.muted)
-                case .open:
-                    // Already open: naming it takes you back to it rather than
-                    // opening a second copy.
-                    Circle()
-                        .fill(Palette.ink.opacity(0.55))
-                        .frame(width: 5, height: 5)
-                        .padding(.horizontal, 2)
-                default:
-                    EmptyView()
-                }
-                Text(offer.key)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.ink)
-                    .lineLimit(1)
-
-                if !offer.title.isEmpty {
+                case .meeting:
+                    // The meeting by name, then when and on which calendar.
                     Text(offer.title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                    if let detail = offer.detail {
+                        Text(detail)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                            .lineLimit(1)
+                    }
+                case .recent, .frequent, .action:
+                    // A page by its title, the address after it in grey —
+                    // the other way round from a typed match, where the
+                    // address is what was matched.
+                    Text(offer.title.isEmpty ? offer.key : offer.title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+                    Text(offer.kind == .action ? offer.key : host)
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
                         .lineLimit(1)
-                        .truncationMode(.tail)
+                default:
+                    Text(offer.key)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.ink)
+                        .lineLimit(1)
+
+                    if !offer.title.isEmpty {
+                        Text(offer.title)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.muted)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
                 Spacer(minLength: 0)
+                if let hint = offer.hint, picked || hovering {
+                    Text(hint)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Palette.faint)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
@@ -149,6 +193,46 @@ struct Omnibox: View {
             }
             .onHover { hovering = $0 }
             .animation(Motion.quick, value: hovering)
+        }
+
+        /// What stands at the row's start: the site's own mark for a page,
+        /// a small symbol on a wash square for the rest.
+        @ViewBuilder
+        private var lead: some View {
+            switch offer.kind {
+            case .search:
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+            case .open:
+                // Already open: naming it takes you back to it rather than
+                // opening a second copy.
+                Circle()
+                    .fill(Palette.ink.opacity(0.55))
+                    .frame(width: 5, height: 5)
+                    .padding(.horizontal, 2)
+            case .meeting:
+                square(offer.hint == "Join ⏎" ? "video" : "calendar")
+            case .action:
+                square(Browser.actions.first { $0.key == offer.key }?.symbol ?? "plus")
+            case .recent, .frequent:
+                Mark(icon: Favicons.shared.cached(host), letter: String(host.prefix(1)).uppercased(), size: 16)
+            default:
+                EmptyView()
+            }
+        }
+
+        private var host: String {
+            guard let host = offer.url.host() else { return offer.key }
+            return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        }
+
+        private func square(_ symbol: String) -> some View {
+            Image(systemName: symbol)
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundStyle(Palette.ink)
+                .frame(width: 20, height: 20)
+                .background(Palette.wash, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
     }
 }

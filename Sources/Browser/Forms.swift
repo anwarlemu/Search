@@ -44,6 +44,26 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
                 }
             case "fullscreen":
                 tab?.immersed = body["on"] as? Bool ?? false
+            case "offer":
+                let kinds = body["kinds"] as? [String] ?? []
+                if let rect = body["rect"] as? [String: Double],
+                   let x = rect["x"], let y = rect["y"], let w = rect["w"], let h = rect["h"] {
+                    tab?.formOffered(
+                        CGRect(x: x, y: y, width: w, height: h), kinds: kinds,
+                        total: body["total"] as? Int ?? 0, yours: body["yours"] as? Int ?? 0
+                    )
+                } else {
+                    tab?.formOffered(nil, kinds: [], total: 0, yours: 0)
+                }
+            case "learned":
+                guard let tab else { return }
+                let fields = (body["fields"] as? [[String: String]] ?? []).compactMap { field -> (kind: String, value: String)? in
+                    guard let kind = field["kind"], let value = field["value"] else { return nil }
+                    return (kind, value)
+                }
+                tab.onLearned?(tab, body["host"] as? String ?? "", fields)
+            case "fillnow":
+                if let tab { tab.onFillNow?(tab) }
             default:
                 break
             }
@@ -116,6 +136,195 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         box.dispatchEvent(new Event('change', { bubbles: true }));
       }
 
+      // --- forms that ask for you ---
+      //
+      // What a box asks for, by its own say-so: the autocomplete it
+      // declares, then its type, then the words on and around it. A box
+      // that could be a username, a search or a card number is left alone.
+      function words(el) {
+        var bits = [el.name, el.id, el.placeholder, el.getAttribute('aria-label')];
+        if (el.labels) for (var i = 0; i < el.labels.length; i++) bits.push(el.labels[i].textContent);
+        var by = el.getAttribute('aria-labelledby');
+        if (by) by.split(/\\s+/).forEach(function (id) { var l = document.getElementById(id); if (l) bits.push(l.textContent); });
+        var wrap = el.closest('label, [class*="field"], [class*="form-group"], [class*="form-item"]');
+        if (wrap && wrap !== el) bits.push((wrap.textContent || '').slice(0, 80));
+        return bits.filter(Boolean).join(' ').toLowerCase().replace(/\\s+/g, ' ');
+      }
+      var AUTO = {
+        'name': 'name', 'given-name': 'given', 'family-name': 'family', 'email': 'email',
+        'tel': 'tel', 'tel-national': 'tel', 'organization': 'org', 'organization-title': 'title',
+        'url': 'url', 'street-address': 'street', 'address-line1': 'street', 'address-line2': 'street2',
+        'address-level2': 'city', 'address-level1': 'state', 'postal-code': 'postcode',
+        'country': 'country', 'country-name': 'country'
+      };
+      function kindOf(el) {
+        var type = (el.type || 'text').toLowerCase();
+        if (['text', 'email', 'tel', 'url', ''].indexOf(type) < 0) return null;
+        var auto = (el.getAttribute('autocomplete') || '').toLowerCase().split(/\\s+/);
+        for (var a = 0; a < auto.length; a++) if (AUTO[auto[a]]) return AUTO[auto[a]];
+        var w = words(el);
+        if (/linkedin/.test(w)) return 'linkedin';
+        if (/twitter|x\\.com|@username|x[-_ ]?handle|\\bx\\b.*(handle|profile)|^x ?\\*?$/.test(w)) return 'x';
+        if (/user ?name|login|password|search|card|cvc|cvv|\\botp\\b|\\bcode\\b|coupon|promo|captcha/.test(w) && !/post ?code|zip/.test(w)) return null;
+        if (type === 'email' || /e-?mail/.test(w)) return 'email';
+        if (type === 'tel' || /phone|mobile|\\btel\\b|whatsapp/.test(w)) return 'tel';
+        if (type === 'url' || /website|home ?page|portfolio|site url|\\burl\\b|your site/.test(w)) return 'url';
+        if (/company|organi[sz]ation|employer|startup|studio|agency|business name/.test(w)) return 'org';
+        if (/job ?title|\\brole\\b|position|occupation|what do you do/.test(w)) return 'title';
+        if (/first ?name|given ?name|forename/.test(w)) return 'given';
+        if (/last ?name|surname|family ?name/.test(w)) return 'family';
+        if (/address ?line ?2|address2|apartment|\\bapt\\b|suite|\\bunit\\b/.test(w)) return 'street2';
+        if (/street|address ?line ?1|address1|\\baddress\\b/.test(w)) return 'street';
+        if (/\\bcity\\b|\\btown\\b|locality/.test(w)) return 'city';
+        if (/\\bstate\\b|province|region|county/.test(w)) return 'state';
+        if (/\\bzip\\b|post ?code|postal/.test(w)) return 'postcode';
+        if (/country/.test(w)) return 'country';
+        if (/\\bname\\b/.test(w)) return 'name';
+        return null;
+      }
+      function visible(el) {
+        var r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      }
+      function scopeOf(el) {
+        return el.form || (el.closest && (el.closest('form') || el.closest('[role="form"], main, article'))) || document;
+      }
+      // The form around a box: its text boxes, which of them ask for what,
+      // and how many choices it holds — the selects, ticks and radios that
+      // stay yours. A sign-in is not one of these; the keychain has it.
+      function plan(el) {
+        var s = scopeOf(el);
+        if (s.querySelector('input[type="password"]')) return null;
+        var boxes = s.querySelectorAll('input, textarea, select');
+        var text = 0, choices = 0, asks = [];
+        for (var i = 0; i < boxes.length; i++) {
+          var b = boxes[i];
+          if (!visible(b) || b.disabled || b.readOnly) continue;
+          var tag = b.tagName.toLowerCase();
+          var type = (b.type || 'text').toLowerCase();
+          if (tag === 'select' || type === 'checkbox' || type === 'radio') { choices++; continue; }
+          if (tag === 'textarea') { text++; continue; }
+          if (['text', 'email', 'tel', 'url', ''].indexOf(type) < 0) continue;
+          text++;
+          var k = kindOf(b);
+          if (k && !b.value) asks.push({ box: b, kind: k });
+        }
+        if (asks.length < 2) return null;
+        return { total: text, yours: choices, asks: asks };
+      }
+      var planned = null, plannedFor = null, filledOn = null;
+      function propose() {
+        var el = document.activeElement;
+        var rect = null, kinds = [], total = 0, yours = 0;
+        if (el && el.tagName && el.tagName.toLowerCase() === 'input' && scopeOf(el) !== filledOn) {
+          if (el !== plannedFor) { plannedFor = el; planned = plan(el); }
+          if (planned) {
+            var r = el.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) {
+              rect = { x: r.left, y: r.top, w: r.width, h: r.height };
+              kinds = planned.asks.map(function (a) { return a.kind; });
+              total = planned.total;
+              yours = planned.yours;
+            }
+          }
+        } else if (!el || el === document.body) {
+          // The caret has left the page — for the offer, perhaps. The plan
+          // is kept for it.
+        } else {
+          plannedFor = null;
+          planned = null;
+        }
+        window.webkit.messageHandlers.officeForms.postMessage({
+          kind: 'offer', rect: rect, kinds: kinds, total: total, yours: yours
+        });
+      }
+
+      // The dot in a filled box: where its answer came from, on hover. It
+      // follows the box as the page moves, and goes the moment you type
+      // over the answer — then it is yours, not the card's.
+      var dots = [];
+      function dot(box, source) {
+        var d = document.createElement('span');
+        d.setAttribute('data-office-dot', '');
+        d.title = source ? 'Filled by Browser, ' + source : 'Filled by Browser';
+        d.style.cssText = 'position:fixed;width:6px;height:6px;border-radius:50%;'
+          + 'background:rgba(0,0,0,.5);box-shadow:0 0 0 1.5px rgba(255,255,255,.9);'
+          + 'z-index:2147483646;pointer-events:auto;cursor:default;';
+        document.documentElement.appendChild(d);
+        dots.push({ box: box, dot: d });
+        box.addEventListener('input', function gone(e) {
+          if (!e.isTrusted) return;
+          d.remove();
+          box.removeEventListener('input', gone);
+        });
+        placeDots();
+      }
+      function placeDots() {
+        for (var i = dots.length - 1; i >= 0; i--) {
+          var p = dots[i];
+          if (!p.box.isConnected || !p.dot.isConnected || !p.box.value) {
+            p.dot.remove();
+            dots.splice(i, 1);
+            continue;
+          }
+          var r = p.box.getBoundingClientRect();
+          if (r.width === 0) { p.dot.style.display = 'none'; continue; }
+          p.dot.style.display = '';
+          p.dot.style.left = (r.right - 14) + 'px';
+          p.dot.style.top = (r.top + r.height / 2 - 3) + 'px';
+        }
+      }
+      window.addEventListener('scroll', placeDots, true);
+      window.addEventListener('resize', placeDots);
+      setInterval(function () { if (dots.length) placeDots(); }, 500);
+
+      function fillForm(values, sources) {
+        var el = plannedFor && plannedFor.isConnected ? plannedFor : document.activeElement;
+        var p = (el && el.tagName && plan(el)) || planned;
+        if (!p) return 0;
+        var n = 0;
+        for (var i = 0; i < p.asks.length; i++) {
+          var a = p.asks[i];
+          var v = values[a.kind];
+          if (!v || a.box.value || !a.box.isConnected) continue;
+          put(a.box, v);
+          var from = sources[a.kind];
+          dot(a.box, from === 'you' ? 'typed by you in Settings' : (from ? 'from ' + from : ''));
+          n++;
+        }
+        filledOn = scopeOf(el && el.tagName ? el : document.body);
+        planned = null;
+        plannedFor = null;
+        return n;
+      }
+
+      // What a form was sent with, by kind, for the card to learn. Never a
+      // password's form, never a choice, never a box the card can't name.
+      function learn(form) {
+        var el = document.activeElement;
+        var s = form || (el && el.tagName ? scopeOf(el) : document);
+        if (!s.querySelectorAll || s.querySelector('input[type="password"]')) return;
+        var boxes = s.querySelectorAll('input');
+        var fields = [];
+        for (var i = 0; i < boxes.length && fields.length < 20; i++) {
+          var b = boxes[i];
+          if (!visible(b) || !b.value) continue;
+          var k = kindOf(b);
+          if (k) fields.push({ kind: k, value: b.value });
+        }
+        if (!fields.length) return;
+        window.webkit.messageHandlers.officeForms.postMessage({
+          kind: 'learned', host: location.hostname, fields: fields
+        });
+      }
+
+      // ⌥⏎ in a box with the offer hanging from it takes the offer.
+      document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' || !e.altKey || !planned || document.activeElement !== plannedFor) return;
+        e.preventDefault();
+        window.webkit.messageHandlers.officeForms.postMessage({ kind: 'fillnow' });
+      }, true);
+
       // What was typed by hand and not yet sent, box by box. A page whose
       // boxes still hold it is not put to sleep: waking it couldn't bring
       // that back. A box emptied by sending — a chat's composer — no longer
@@ -148,6 +357,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
 
       window.__officeForms = {
         unsaved: unsaved,
+        fillForm: fillForm,
         fill: function (user, password) {
           var both = pair();
           if (!both) return false;
@@ -173,11 +383,15 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         });
       }
 
-      document.addEventListener('submit', offer, true);
+      document.addEventListener('submit', function (e) {
+        offer();
+        learn(e.target && e.target.tagName === 'FORM' ? e.target : null);
+      }, true);
       document.addEventListener('keydown', function (e) {
-        if (e.key !== 'Enter') return;
+        if (e.key !== 'Enter' || e.altKey) return;
         var both = pair();
         if (both && (document.activeElement === both.pass || document.activeElement === both.user)) offer();
+        else learn(null);
       }, true);
       // Plenty of sign-in buttons aren't in a form and never fire submit.
       document.addEventListener('click', function (e) {
@@ -185,6 +399,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         if (!el || !el.closest) return;
         if (el.closest('button, input[type="submit"], [role="button"]')) {
           setTimeout(offer, 0);
+          setTimeout(function () { learn(null); }, 0);
         }
       }, true);
 
@@ -243,6 +458,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           typing: editable(el),
           rect: rect
         });
+        propose();
       }
 
       // The box moves when the page scrolls or the window changes size, and

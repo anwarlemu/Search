@@ -98,6 +98,19 @@ final class Preferences: ObservableObject {
     @Published var fillsPasswords: Bool {
         didSet { store.set(fillsPasswords, forKey: "passwords.fill") }
     }
+    /// Offer to fill a form from the card — see Filling.swift.
+    @Published var fillsForms: Bool {
+        didSet { store.set(fillsForms, forKey: "forms.fill") }
+    }
+    /// Keep what you type into forms, for the card — see Card.swift.
+    @Published var learnsForms: Bool {
+        didSet { store.set(learnsForms, forKey: "forms.learn") }
+    }
+    /// A meeting from the calendar at the top of an empty tab — see
+    /// Agenda.swift. Off until asked for, because macOS asks in turn.
+    @Published var agenda: Bool {
+        didSet { store.set(agenda, forKey: "agenda") }
+    }
     /// The first launch has been walked through. Until then the welcome
     /// stands over the window.
     @Published var welcomed: Bool {
@@ -160,6 +173,9 @@ final class Preferences: ObservableObject {
         asksWhereToSave = store.bool(forKey: "downloads.ask")
         savesPasswords = store.object(forKey: "passwords.save") as? Bool ?? true
         fillsPasswords = store.object(forKey: "passwords.fill") as? Bool ?? true
+        fillsForms = store.object(forKey: "forms.fill") as? Bool ?? true
+        learnsForms = store.object(forKey: "forms.learn") as? Bool ?? true
+        agenda = store.bool(forKey: "agenda")
         // Anyone who already has a session was here before the welcome
         // existed; they are not asked to sit through it.
         welcomed = store.bool(forKey: "welcomed") || store.object(forKey: "glyph") != nil

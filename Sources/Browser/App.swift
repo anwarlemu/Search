@@ -359,7 +359,14 @@ struct ContentView: View {
                                         .transition(.opacity)
                                 }
                             }
+                            .overlay(alignment: .topLeading) {
+                                if let asked = browser.filling, asked.tab == tab.id, browser.suggesting == nil {
+                                    FillOffer(browser: browser, asked: asked)
+                                        .transition(.opacity)
+                                }
+                            }
                             .animation(Motion.quick, value: browser.suggesting)
+                            .animation(Motion.quick, value: browser.filling)
                     } else {
                         Palette.ground
                     }
@@ -829,6 +836,10 @@ struct ContentView: View {
             }
             if browser.suggesting != nil {
                 browser.dropChoice()
+                return true
+            }
+            if browser.filling != nil {
+                browser.dropFill()
                 return true
             }
             if browser.veiling {

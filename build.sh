@@ -127,6 +127,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <string>Websites you visit can ask to use your camera. Browser asks you first, every time, for each site.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>Websites you visit can ask to use your microphone. Browser asks you first, every time, for each site.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>With your say-so, an empty tab shows a meeting from your calendar that is about to start, and the way into it. Nothing is read until you turn this on in Settings, and nothing leaves your Mac.</string>
   <key>NSDownloadsFolderUsageDescription</key>
   <string>Files you download are saved to your Downloads folder.</string>
 </dict>

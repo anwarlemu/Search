@@ -242,6 +242,14 @@ final class Tab: ObservableObject, Identifiable {
     /// The caret has entered or left one of the sign-in boxes; where the box
     /// is, in the web view's points, or nil when it has left.
     var onField: ((Tab, CGRect?) -> Void)?
+    /// The caret in a form that asks for things on the card: where the box
+    /// is (nil once the caret has left), the kinds asked for, how many
+    /// text boxes the form has, how many choices. See Filling.swift.
+    var onFormOffer: ((Tab, CGRect?, [String], Int, Int) -> Void)?
+    /// What a form was sent with, by kind, and the site it went to.
+    var onLearned: ((Tab, String, [(kind: String, value: String)]) -> Void)?
+    /// ⌥⏎ in a box with the offer hanging from it.
+    var onFillNow: ((Tab) -> Void)?
     /// The site the sign-in was sent from — not the one it landed on —
     /// then the name and the password.
     var onCredentials: ((Tab, String, String, String) -> Void)?
@@ -551,6 +559,35 @@ final class Tab: ObservableObject, Identifiable {
             x: rect.minX * zoom, y: rect.minY * zoom,
             width: rect.width * zoom, height: rect.height * zoom
         ))
+    }
+
+    func formOffered(_ rect: CGRect?, kinds: [String], total: Int, yours: Int) {
+        guard let rect else {
+            onFormOffer?(self, nil, [], 0, 0)
+            return
+        }
+        let zoom = built?.pageZoom ?? 1
+        onFormOffer?(self, CGRect(
+            x: rect.minX * zoom, y: rect.minY * zoom,
+            width: rect.width * zoom, height: rect.height * zoom
+        ), kinds, total, yours)
+    }
+
+    /// The card's answers into the form, by kind, each with where it came
+    /// from for the dot. Hears back how many boxes took one.
+    func fillForm(_ values: [String: String], sources: [String: String], done: ((Int) -> Void)? = nil) {
+        guard let v = try? JSONSerialization.data(withJSONObject: values),
+              let s = try? JSONSerialization.data(withJSONObject: sources),
+              let vs = String(data: v, encoding: .utf8), let ss = String(data: s, encoding: .utf8)
+        else {
+            done?(0)
+            return
+        }
+        web.evaluateJavaScript(
+            "window.__officeForms ? window.__officeForms.fillForm(JSON.parse(`\(escape(vs))`), JSON.parse(`\(escape(ss))`)) : 0"
+        ) { result, _ in
+            done?((result as? Int) ?? 0)
+        }
     }
 
     /// A name and password the page has just sent — held, not yet offered.

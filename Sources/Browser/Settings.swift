@@ -11,11 +11,12 @@ struct SettingsPanel: View {
 
     @ObservedObject private var updater = Updater.shared
     @ObservedObject private var shield = Shield.shared
+    @ObservedObject private var me = Me.shared
     @State private var isDefault = Links.isDefault
     @State private var page: Page = Page(rawValue: Store.settings.string(forKey: "settings.page") ?? "") ?? .general
 
     enum Page: String, CaseIterable, Identifiable {
-        case general, tabs, keys, extensions, passwords, downloads, privacy, about
+        case general, tabs, keys, extensions, passwords, you, downloads, privacy, about
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -24,6 +25,7 @@ struct SettingsPanel: View {
             case .keys: return "Shortcuts"
             case .extensions: return "Extensions"
             case .passwords: return "Passwords"
+            case .you: return "You"
             case .downloads: return "Downloads"
             case .privacy: return "Privacy"
             case .about: return "About"
@@ -36,6 +38,7 @@ struct SettingsPanel: View {
             case .keys: return "keyboard"
             case .extensions: return "puzzlepiece.extension"
             case .passwords: return "key"
+            case .you: return "person.text.rectangle"
             case .downloads: return "arrow.down.circle"
             case .privacy: return "hand.raised"
             case .about: return "info.circle"
@@ -138,6 +141,7 @@ struct SettingsPanel: View {
                     case .keys: ShortcutsPage(browser: browser, keys: browser.keys)
                     case .extensions: ExtensionsPage(browser: browser)
                     case .passwords: passwords
+                    case .you: you
                     case .downloads: downloads
                     case .privacy: privacy
                     case .about: about
@@ -183,8 +187,99 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.autocorrect)
             }
             Rule()
+            Line(
+                "What's next, on an empty tab",
+                "A meeting from your calendar that is under way or about to start, with the way in — macOS asks once, and nothing leaves the Mac"
+            ) {
+                Switch(on: Binding(
+                    get: { prefs.agenda },
+                    set: { on in
+                        guard on else {
+                            prefs.agenda = false
+                            return
+                        }
+                        if Agenda.shared.allowed {
+                            prefs.agenda = true
+                            return
+                        }
+                        Agenda.shared.ask { granted in
+                            prefs.agenda = granted
+                            if !granted {
+                                browser.announce("macOS didn't allow it — System Settings › Privacy & Security › Calendars")
+                            }
+                        }
+                    }
+                ))
+            }
+            Rule()
             Line("Let a script drive Browser", "A local socket for testing. Its tabs open beside yours with a flask on them and never take over — see ./bench") {
                 Switch(on: $prefs.bench)
+            }
+        }
+    }
+
+    // MARK: - you
+
+    /// What Browser knows about you, line by line, with where each came
+    /// from — and the switches that decide whether it learns and offers.
+    private var you: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            youDetails
+            youPlaces
+            youSwitches
+        }
+    }
+
+    private func entry(for kind: String) -> Binding<String> {
+        Binding(
+            get: { me.details.first { $0.kind == kind }?.value ?? "" },
+            set: { me.set(kind, to: $0) }
+        )
+    }
+
+    private var youDetails: some View {
+        Card {
+            ForEach(Array(Me.kinds.enumerated()), id: \.element.kind) { index, entry in
+                if index > 0 { Rule() }
+                Line(entry.label, me.source(for: entry.kind).map(Me.describe) ?? "Not known yet") {
+                    Entry(text: self.entry(for: entry.kind))
+                }
+            }
+        }
+    }
+
+    private var youPlaces: some View {
+        Card {
+            if me.places.isEmpty {
+                Line("Addresses", "Learned whole from the first address you give a site — the street, the city, the rest") {
+                    EmptyView()
+                }
+            } else {
+                ForEach(Array(me.places.enumerated()), id: \.element.id) { index, place in
+                    if index > 0 { Rule() }
+                    Line(place.line, Me.describe(source: place.source)) {
+                        Pill("Forget") { me.forget(place) }
+                    }
+                }
+            }
+        }
+    }
+
+    private var youSwitches: some View {
+        Card {
+            Line("Offer to fill forms", "A form that asks for things on this card gets an offer under the box — nothing is filled unasked, and choices stay yours") {
+                Switch(on: $prefs.fillsForms)
+            }
+            Rule()
+            Line("Learn from forms you send", "What you type into a form is kept here for the next one — never a password, never a choice") {
+                Switch(on: $prefs.learnsForms)
+            }
+            Rule()
+            Line("Forget everything", "The card is emptied. Sites are none the wiser; they never had it") {
+                Pill("Forget") {
+                    me.forgetAll()
+                    browser.announce("Forgotten")
+                }
             }
         }
     }
@@ -522,6 +617,23 @@ struct Switch: View {
 
 /// A small capsule that does one thing. Outlined by default; filled in ink
 /// when it is the thing you came here to press.
+/// A short answer, typed in place: the wash of a live tab for its ground,
+/// no border, the ink for its text.
+struct Entry: View {
+    @Binding var text: String
+
+    var body: some View {
+        TextField("", text: $text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 12.5))
+            .foregroundStyle(Palette.ink)
+            .frame(width: 220)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Palette.wash, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+}
+
 struct Pill: View {
     let title: String
     var filled = false

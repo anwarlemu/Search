@@ -320,7 +320,10 @@ final class Browser: NSObject, ObservableObject {
 
     /// Typed plus whatever the field is quietly finishing for you.
     var completed: String {
-        if let picked, offers.indices.contains(picked) { return offers[picked].key }
+        if let picked, offers.indices.contains(picked) {
+            let row = offers[picked]
+            return row.kind == .meeting ? typed : row.key
+        }
         return typed + (ending ?? "")
     }
 
@@ -459,6 +462,10 @@ final class Browser: NSObject, ObservableObject {
         let spot: CGRect
         let logins: [Login]
     }
+    /// The offer to fill a form from the card, hanging from the box the
+    /// caret is in — see Filling.swift.
+    @Published var filling: Filling?
+    var loweringFill: DispatchWorkItem?
     /// Set once you have picked, so the list doesn't come straight back for
     /// the box you are still in. Cleared when the caret leaves the boxes.
     private var pickedInto: Tab.ID?
@@ -932,6 +939,17 @@ final class Browser: NSObject, ObservableObject {
                 }
             }
         }
+        // "in 9m" has to go on being true: an empty tab left open is asked
+        // again each minute, and only then.
+        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.fieldShowing, !self.summoning,
+                      self.typed.isEmpty, self.active?.isBlank == true
+                else { return }
+                self.guess()
+            }
+        }
+
         // The little window's own three buttons.
         floater.onReturn = { [weak self] in
             guard let self else { return }
@@ -1044,7 +1062,12 @@ final class Browser: NSObject, ObservableObject {
         // run loop later, so the window is drawn first. Building its web view
         // here held the first frame back by some forty milliseconds.
         let first = tabs[here]
-        DispatchQueue.main.async { first.wake() }
+        DispatchQueue.main.async { [weak self] in
+            first.wake()
+            // An empty tab at launch has its list from the start, not from
+            // the first keystroke.
+            self?.guess()
+        }
     }
 
     /// The private window is closing: every page in it goes, and the store
@@ -1670,6 +1693,16 @@ final class Browser: NSObject, ObservableObject {
             }
         }
 
+        // A form asking for things on the card, and what one was sent with.
+        tab.onFormOffer = { [weak self] tab, spot, kinds, total, yours in
+            self?.offerFill(tab, at: spot, asks: kinds, total: total, yours: yours)
+        }
+        tab.onLearned = { [weak self] _, host, fields in self?.learned(fields, on: host) }
+        tab.onFillNow = { [weak self] tab in
+            guard let self, filling?.tab == tab.id else { return }
+            fillForm()
+        }
+
         tab.onCredentials = { [weak self] tab, host, user, password in
             guard let self, prefs.savesPasswords, !password.isEmpty, !tab.shy,
                   !Vault.isNever(host)
@@ -1763,7 +1796,10 @@ final class Browser: NSObject, ObservableObject {
         }
 
         guard !typed.trimmingCharacters(in: .whitespaces).isEmpty else {
-            offers = []
+            // Nothing typed on an empty tab: the few things worth having
+            // before you type — see Fresh.swift. Over a page (⌘L) the field
+            // stays bare; the page is what you were looking at.
+            offers = active?.isBlank == true ? fresh() : []
             ending = nil
             picked = nil
             return
@@ -1823,7 +1859,7 @@ final class Browser: NSObject, ObservableObject {
         if let id = offer.tab, let tab = tabs.first(where: { $0.id == id }) {
             select(tab)
         } else {
-            (active ?? tabs.first)?.go(to: offer.url)
+            go(to: offer)
         }
         editing = false
         typed = ""
@@ -1900,6 +1936,11 @@ final class Browser: NSObject, ObservableObject {
             }
         }
 
+        // A meeting without a link opens in Calendar, not in a tab.
+        if let picked, offers.indices.contains(picked), offers[picked].kind == .meeting {
+            take(offers[picked])
+            return
+        }
         let target: URL?
         if let picked, offers.indices.contains(picked) {
             target = offers[picked].url

@@ -12,6 +12,13 @@ struct Suggestion: Identifiable, Equatable {
     let kind: Kind
     /// Set when this is a page you already have open somewhere.
     var tab: UUID?
+    /// The heading this row sits under, on an empty tab's list — see
+    /// Fresh.swift. Rows with none are the field's ordinary answers.
+    var section: String? = nil
+    /// A second line's worth, grey: when a meeting is, which calendar.
+    var detail: String? = nil
+    /// What Return does here, shown at the row's end: "Join ⏎".
+    var hint: String? = nil
 
     enum Kind {
         /// A page that is open right now.
@@ -22,6 +29,9 @@ struct Suggestion: Identifiable, Equatable {
         case known
         /// Not a place at all — words, and an engine to ask.
         case search
+        /// On an empty tab: a meeting from the calendar, a page you were
+        /// just on, one you keep going back to, a place to make something.
+        case meeting, recent, frequent, action
     }
 
     var id: String { key }
