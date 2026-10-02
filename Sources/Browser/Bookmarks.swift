@@ -189,7 +189,9 @@ final class Bookmarks: ObservableObject {
             for i in nodes.indices {
                 if nodes[i].id == id {
                     if let title { nodes[i].title = title }
-                    if let url, !nodes[i].isFolder { nodes[i].url = url }
+                    // An extension's string is kept only when it is an
+                    // address: one that wasn't crashed the row that drew it.
+                    if let url, !nodes[i].isFolder, URL(string: url)?.host() != nil { nodes[i].url = url }
                     return true
                 }
                 guard var kids = nodes[i].children else { continue }
@@ -256,7 +258,7 @@ struct BookmarkOutline: View {
             Row(
                 node: node,
                 depth: depth,
-                open: node.isFolder ? nil : { open(URL(string: node.url!)!) },
+                open: node.isFolder ? nil : { node.url.flatMap(URL.init(string:)).map(open) },
                 isOpen: expanded.contains(node.id),
                 dragging: dragging == node.id,
                 toggle: node.isFolder ? { toggle(node.id) } : nil,
