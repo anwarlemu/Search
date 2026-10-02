@@ -1002,11 +1002,15 @@ struct ExtensionSlot: View {
 private struct ExtensionButtons: View {
     @ObservedObject var extensions: Extensions
     let edge: Edge
+    static let pinsShown = 4
 
     var body: some View {
         if !extensions.installed.isEmpty {
             HStack(spacing: 2) {
-                ForEach(extensions.buttons.filter(\.pinned)) { button in
+                // The first few pins only: every pinned extension in a row
+                // that has no overflow pushed the address field aside. The
+                // rest are still in the list behind the puzzle (2 Oct 2026).
+                ForEach(extensions.buttons.filter(\.pinned).prefix(ExtensionButtons.pinsShown)) { button in
                     ActionButton(button: button) { extensions.press(button.id) }
                         .background(Anchor(id: button.id))
                         .contextMenu { ExtensionActions(id: button.id, name: button.name, extensions: extensions) }
