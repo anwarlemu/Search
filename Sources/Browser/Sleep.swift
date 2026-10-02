@@ -29,13 +29,7 @@ extension Browser {
 
     /// Started once, at launch.
     func watchForSleep() {
-        let every = min(60, max(5, Browser.sleepAfter / 4))
-        let timer = Timer(timeInterval: every, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.sleepIdle() }
-        }
-        timer.tolerance = every / 4
-        RunLoop.main.add(timer, forMode: .common)
-        dozing = timer
+        armSleep()
 
         let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         source.setEventHandler { [weak self] in
@@ -52,11 +46,36 @@ extension Browser {
         pressure = source
     }
 
+    /// One timer, set for the moment the tab left longest will have been
+    /// left long enough — not a look at every tab every minute, most of
+    /// which found nothing (2 Oct 2026). A tab past due but kept awake,
+    /// loading or playing, is looked at again in a minute; nothing to look
+    /// at means the next look is a whole wait away. Set again after every
+    /// look, whatever it found.
+    private func armSleep() {
+        dozing?.invalidate()
+        let wait = Browser.sleepAfter
+        let now = Date()
+        let due = (tabs + parkedTabs)
+            .filter { !$0.asleep && !$0.isBlank && $0.built != nil }
+            .map { $0.touched.addingTimeInterval(wait) }
+            .min() ?? now.addingTimeInterval(wait)
+        let soon = min(60, max(5, wait / 4))
+        let interval = due > now ? max(1, due.timeIntervalSince(now)) : soon
+        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.sleepIdle() }
+        }
+        timer.tolerance = interval / 4
+        RunLoop.main.add(timer, forMode: .common)
+        dozing = timer
+    }
+
     /// Every tab that has gone long enough without being looked at, the one
     /// left longest first. The other profiles' too: a tab parked while it
     /// was loading or playing stayed awake, and nothing came back for it
     /// once it had finished (2 Oct 2026).
     func sleepIdle(within given: TimeInterval? = nil, pictured: Bool = true) {
+        defer { armSleep() }
         guard prefs.sleepsTabs else { return }
         let wait = given ?? Browser.sleepAfter
         let now = Date()

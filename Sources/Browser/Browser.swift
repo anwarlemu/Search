@@ -897,8 +897,8 @@ final class Browser: NSObject, ObservableObject {
     }
 
     private var bag = Set<AnyCancellable>()
-    /// The minute-by-minute look for tabs to put to sleep, and the ear for
-    /// macOS saying memory is short. See Sleep.swift.
+    /// The next look for tabs to put to sleep, and the ear for macOS saying
+    /// memory is short. See Sleep.swift.
     var dozing: Timer?
     var pressure: DispatchSourceMemoryPressure?
     /// Downloads still under way. See `keep(_:)`.
