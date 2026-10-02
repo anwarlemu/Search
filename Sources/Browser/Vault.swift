@@ -63,13 +63,22 @@ enum Vault {
     /// on the page you saved it from — accounts.example.com asks, and the
     /// password was kept for example.com. So the site is matched as a site:
     /// the host first, then anything sharing its registrable domain.
-    static func logins(matching host: String) -> [Login] {
+    ///
+    /// Ordered and cut to `limit` on the attributes alone, before any secret
+    /// is read: each secret is its own trip to securityd, and a list that
+    /// shows five was paying for every account on the domain (2 Oct 2026).
+    static func logins(matching host: String, limit: Int? = nil) -> [Login] {
         let domain = registrable(host)
-        let exact = logins(for: host)
-        let wider = rows(where: [:])
-            .filter { ($0[kSecAttrServer as String] as? String).map { $0 != host && registrable($0) == domain } ?? false }
-            .compactMap(login(from:))
-        return (exact + wider).sorted { ($0.used ?? .distantPast) > ($1.used ?? .distantPast) }
+        let site = rows(where: [:]).filter { row in
+            (row[kSecAttrServer as String] as? String).map { $0 == host || registrable($0) == domain } ?? false
+        }
+        let ordered = site.sorted {
+            let (a, b) = (used(in: $0) ?? .distantPast, used(in: $1) ?? .distantPast)
+            if a != b { return a > b }
+            let (x, y) = ($0[kSecAttrServer as String] as? String == host, $1[kSecAttrServer as String] as? String == host)
+            return x && !y
+        }
+        return (limit.map { Array(ordered.prefix($0)) } ?? ordered).compactMap(login(from:))
     }
 
     /// Everything this app holds, for the list. Read on demand and never kept
@@ -130,10 +139,12 @@ enum Vault {
               let user = row[kSecAttrAccount as String] as? String,
               let password = secret(host: host, user: user)
         else { return nil }
-        // The keychain has no "last used" of its own; it rides in the comment.
-        let used = (row[kSecAttrComment as String] as? String)
-            .flatMap(Double.init).map(Date.init(timeIntervalSince1970:))
-        return Login(host: host, user: user, password: password, used: used)
+        return Login(host: host, user: user, password: password, used: used(in: row))
+    }
+
+    /// The keychain has no "last used" of its own; it rides in the comment.
+    private static func used(in row: [String: Any]) -> Date? {
+        (row[kSecAttrComment as String] as? String).flatMap(Double.init).map(Date.init(timeIntervalSince1970:))
     }
 
     // MARK: - writing

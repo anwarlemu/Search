@@ -1647,7 +1647,7 @@ final class Browser: NSObject, ObservableObject {
                   let host = curtain.host(of: tab.address)
             else { return }
             let ask = fieldAsk
-            Vault.off({ Array(Vault.logins(matching: host).prefix(5)) }) { [weak self, weak tab] known in
+            Vault.off({ Vault.logins(matching: host, limit: 5) }) { [weak self, weak tab] known in
                 guard let self, let tab, ask == fieldAsk, tab.id == activeID, pickedInto != tab.id else { return }
                 suggesting = known.isEmpty ? nil : Suggesting(tab: tab.id, spot: spot, logins: known)
             }
