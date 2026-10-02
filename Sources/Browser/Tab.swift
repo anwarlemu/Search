@@ -510,9 +510,6 @@ final class Tab: ObservableObject, Identifiable {
             WKUserScript(source: ScrollRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         )
         controller.addUserScript(
-            WKUserScript(source: Veiling.picker, injectionTime: .atDocumentStart, forMainFrameOnly: true)
-        )
-        controller.addUserScript(
             WKUserScript(source: FormRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         )
         controller.addUserScript(
@@ -560,8 +557,16 @@ final class Tab: ObservableObject, Identifiable {
         built?.evaluateJavaScript("window.__officeNotify && window.__officeNotify('\(state)')")
     }
 
-    func startPicking() { web.evaluateJavaScript("window.__officeVeil && window.__officeVeil.on()") }
-    func stopPicking() { web.evaluateJavaScript("window.__officeVeil && window.__officeVeil.off()") }
+    func startPicking() { veil("on()") }
+    func stopPicking() { veil("off()") }
+
+    /// The pointing mode, put into the page the first time it is asked for
+    /// and kept by the page from then on. It went into every page at
+    /// document start — six kilobytes of script for a thing most pages
+    /// never had pointed at them (2 Oct 2026).
+    private func veil(_ call: String) {
+        web.evaluateJavaScript(Veiling.picker + "\nwindow.__officeVeil.\(call)")
+    }
 
     func foundSignIn() { onSignIn?(self) }
 
@@ -650,13 +655,11 @@ final class Tab: ObservableObject, Identifiable {
 
     /// Show one hidden thing while the pointer rests on its row in the list.
     func peek(_ selector: String, keeping css: String) {
-        web.evaluateJavaScript(
-            "window.__officeVeil && window.__officeVeil.peek(`\(escape(css))`, `\(escape(selector))`)"
-        )
+        veil("peek(`\(escape(css))`, `\(escape(selector))`)")
     }
 
     func unpeek(_ css: String) {
-        web.evaluateJavaScript("window.__officeVeil && window.__officeVeil.unpeek(`\(escape(css))`)")
+        veil("unpeek(`\(escape(css))`)")
     }
 
     private func escape(_ text: String) -> String {
