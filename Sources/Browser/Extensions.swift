@@ -258,6 +258,7 @@ final class Extensions: NSObject, ObservableObject {
         try? controller.unload(context)
         contexts[id] = nil
         forgetIcons(of: id)
+        ExtensionShims.forget(id)
         actionsChanged += 1
     }
 

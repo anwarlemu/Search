@@ -1804,6 +1804,19 @@ enum ExtensionShims {
     /// One voice for every extension that reads aloud.
     static let speaker = NSSpeechSynthesizer()
 
+    /// Everything kept here for an extension while it ran, let go as it
+    /// unloads: its offscreen page (a web view, and a process, that outlived
+    /// it), the sleep it held off, the popups and panel it set. A reload
+    /// starts it clean, as Chrome does (2 Oct 2026).
+    static func forget(_ id: String) {
+        offscreen[id] = nil
+        if let held = awake.removeValue(forKey: id) { IOPMAssertionRelease(held) }
+        popups[id] = nil
+        panelPath[id] = nil
+        panelOnClick.remove(id)
+        if ExtensionPopup.shared.extensionID == id { ExtensionPopup.shared.close() }
+    }
+
     static func answer(_ message: Any, from context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
         guard let body = message as? [String: Any], let api = body["api"] as? String else {
             return ["error": "Not a Browser message"]
