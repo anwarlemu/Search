@@ -242,14 +242,16 @@ final class Keys: ObservableObject {
             }
         }
 
-        /// Keys a page may take for itself first — ⌘K in Slack, ⌘F in Docs —
-        /// and that come back to the browser when the page lets them pass.
-        /// Tabs, windows and profiles are always the browser's.
+        /// Keys a page may take for itself first — ⌘K in Slack, ⌘F in Docs,
+        /// ⌘S in Figma — and that come back to the browser when the page
+        /// lets them pass. Tabs, windows and profiles are always the
+        /// browser's.
         var pageFirst: Bool {
             switch self {
             case .switchTab, .findOnPage, .findNext, .findPrevious, .print, .copyAddress, .pasteAndGo,
                  .bookmark, .history, .downloads, .duplicate, .readingMode, .floatVideo, .hideElements,
-                 .hiddenHere, .zoomIn, .zoomOut, .actualSize, .inspector, .back, .forward, .bookmarks, .muteTab:
+                 .hiddenHere, .zoomIn, .zoomOut, .actualSize, .inspector, .back, .forward, .bookmarks, .muteTab,
+                 .hideTabs:
                 return true
             default:
                 return false
