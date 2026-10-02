@@ -14,6 +14,8 @@ import SwiftUI
 
 extension Browser {
     /// A name asked for in a sheet, the old one in the field if there is one.
+    /// On this browser's window — a private window asking got the sheet on
+    /// the main one (2 Oct 2026).
     func askProfileName(_ title: String, current: String = "", then done: @escaping (String) -> Void) {
         let alert = NSAlert()
         alert.messageText = title
@@ -29,7 +31,7 @@ extension Browser {
             guard answer == .alertFirstButtonReturn, !name.isEmpty else { return }
             done(name)
         }
-        if let window = Links.window {
+        if let window = window ?? Links.window {
             alert.beginSheetModal(for: window, completionHandler: finish)
         } else {
             finish(alert.runModal())
@@ -64,7 +66,7 @@ extension Browser {
             guard answer == .alertFirstButtonReturn, let self else { return }
             deleteProfile(index)
         }
-        if let window = Links.window {
+        if let window = window ?? Links.window {
             alert.beginSheetModal(for: window, completionHandler: finish)
         } else {
             finish(alert.runModal())
