@@ -697,7 +697,7 @@ struct ContentView: View {
         close: @escaping () -> Void
     ) -> some View {
         ZStack {
-            Color.black.opacity(0.10)
+            Palette.scrim
                 .ignoresSafeArea()
                 .onTapGesture(perform: close)
             panel()
