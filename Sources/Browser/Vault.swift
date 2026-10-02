@@ -103,22 +103,26 @@ enum Vault {
         return rows
     }
 
-    /// One item's secret, by the two things that name it.
+    /// One item's secret, by the two things that name it. Under either
+    /// label: a password kept before the rename was listed but never read,
+    /// because this asked for the new label only (2 Oct 2026).
     private static func secret(host: String, user: String) -> String? {
-        var out: CFTypeRef?
-        let status = SecItemCopyMatching([
-            kSecClass as String: kSecClassInternetPassword,
-            kSecAttrLabel as String: label,
-            kSecAttrServer as String: host,
-            kSecAttrAccount as String: user,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ] as CFDictionary, &out)
-        guard status == errSecSuccess, let data = out as? Data else {
+        for label in [label, formerLabel] {
+            var out: CFTypeRef?
+            let status = SecItemCopyMatching([
+                kSecClass as String: kSecClassInternetPassword,
+                kSecAttrLabel as String: label,
+                kSecAttrServer as String: host,
+                kSecAttrAccount as String: user,
+                kSecReturnData as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne,
+            ] as CFDictionary, &out)
+            if status == errSecSuccess, let data = out as? Data {
+                return String(data: data, encoding: .utf8)
+            }
             if status != errSecItemNotFound { NSLog("Vault: keychain read failed (%d)", status) }
-            return nil
         }
-        return String(data: data, encoding: .utf8)
+        return nil
     }
 
     private static func login(from row: [String: Any]) -> Login? {
