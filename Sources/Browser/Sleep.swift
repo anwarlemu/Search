@@ -41,7 +41,11 @@ extension Browser {
         source.setEventHandler { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, let event = self.pressure?.data else { return }
-                self.sleepIdle(within: event.contains(.critical) ? 0 : 5 * 60)
+                // Critical is every tab at once, and a picture of each —
+                // at the moment there is least room for pictures — is
+                // what it can least afford. They come back white instead.
+                let critical = event.contains(.critical)
+                self.sleepIdle(within: critical ? 0 : 5 * 60, pictured: !critical)
             }
         }
         source.resume()
@@ -50,14 +54,14 @@ extension Browser {
 
     /// Every tab that has gone long enough without being looked at, the one
     /// left longest first.
-    func sleepIdle(within given: TimeInterval? = nil) {
+    func sleepIdle(within given: TimeInterval? = nil, pictured: Bool = true) {
         guard prefs.sleepsTabs else { return }
         let wait = given ?? Browser.sleepAfter
         let now = Date()
         let idle = tabs
             .filter { now.timeIntervalSince($0.touched) >= wait && awake(because: $0) == nil }
             .sorted { $0.touched < $1.touched }
-        for tab in idle { self.sleep(tab) }
+        for tab in idle { self.sleep(tab, pictured: pictured) }
     }
 
     /// Why a tab has to stay awake — nil when nothing keeps it. The clock is
@@ -84,8 +88,9 @@ extension Browser {
 
     /// Asks the page whether it holds anything typed, pictures it, then lets
     /// it go — looking again at each step, since each takes a moment and you
-    /// may have gone back to the tab in the meantime.
-    func sleep(_ tab: Tab, parking: Bool = false, done: ((String) -> Void)? = nil) {
+    /// may have gone back to the tab in the meantime. `pictured` false
+    /// skips the picture.
+    func sleep(_ tab: Tab, parking: Bool = false, pictured: Bool = true, done: ((String) -> Void)? = nil) {
         if let reason = awake(because: tab, parking: parking) {
             done?(reason)
             return
@@ -98,6 +103,11 @@ extension Browser {
             }
             if let reason = self.awake(because: tab, parking: self.parked(tab, parking)) {
                 done?(reason)
+                return
+            }
+            guard pictured else {
+                tab.sleep(picture: nil)
+                done?("asleep")
                 return
             }
             tab.snapshot { [weak self, weak tab] picture in
