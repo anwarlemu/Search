@@ -461,6 +461,19 @@ final class Extensions: NSObject, ObservableObject {
         }
     }
 
+    /// Asked first, as a sheet like every other question here — from the
+    /// row's menu and from Settings alike, where Remove once went straight
+    /// through (2 Oct 2026).
+    func confirmRemove(_ id: String) {
+        guard let item = installed.first(where: { $0.id == id }) else { return }
+        Task {
+            if await ask("Remove “\(item.name)”?", detail: "Its settings and data go with it.",
+                         icon: contexts[id]?.webExtension.icon(for: CGSize(width: 64, height: 64)), yes: "Remove", no: "Cancel") {
+                remove(id)
+            }
+        }
+    }
+
     func remove(_ id: String) {
         unload(id)
         errors[id] = nil
@@ -1177,16 +1190,7 @@ private struct ExtensionActions: View {
         }
         SwiftUI.Button("Reload") { extensions.reload(id) }
         Divider()
-        SwiftUI.Button("Remove “\(name)”…") { ExtensionActions.confirmRemove(id, name: name, extensions) }
-    }
-
-    static func confirmRemove(_ id: String, name: String, _ extensions: Extensions) {
-        let alert = NSAlert()
-        alert.messageText = "Remove “\(name)”?"
-        alert.informativeText = "Its settings and data go with it."
-        alert.addButton(withTitle: "Remove")
-        alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn { extensions.remove(id) }
+        SwiftUI.Button("Remove “\(name)”…") { extensions.confirmRemove(id) }
     }
 }
 

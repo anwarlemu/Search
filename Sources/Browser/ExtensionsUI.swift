@@ -135,7 +135,7 @@ struct ExtensionsPage: View {
                     if context?.optionsPageURL != nil {
                         Quick("Options") { extensions.openOptions(item.id) }
                     }
-                    Quick("Remove", tint: .red.opacity(0.75)) { extensions.remove(item.id) }
+                    Quick("Remove…", tint: .red.opacity(0.75)) { extensions.confirmRemove(item.id) }
                 }
                 Switch(on: Binding(get: { item.enabled }, set: { extensions.setEnabled(item.id, $0) }))
             }
