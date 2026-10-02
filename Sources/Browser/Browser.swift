@@ -1339,6 +1339,13 @@ final class Browser: NSObject, ObservableObject {
         // looking at before. Only Unpin takes it out of the row.
         if tab.pin != nil {
             tab.rest()
+            // A pin put down from its cross while you were elsewhere leaves
+            // you where you were: landing somewhere else as well took you
+            // off the page you were reading (2 Oct 2026).
+            guard tab.id == activeID else {
+                writeSession()
+                return
+            }
             // Ordinary tabs first. Falling back to the most recent tab of any
             // kind meant closing one pin landed you on another pin, and ⌘W
             // bounced between the two instead of getting you out of them.
