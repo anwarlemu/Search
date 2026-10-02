@@ -292,7 +292,16 @@ final class Keys: ObservableObject {
 
     @Published private(set) var chords: [Command: Chord] = [:]
     @Published private(set) var custom: [Custom] = []
-    @Published var recording: Target?
+    @Published var recording: Target? { didSet { reserved = nil } }
+    /// A key pressed while recording that macOS keeps for itself, so the
+    /// page can say why nothing happened.
+    @Published private(set) var reserved: Chord?
+
+    /// Quit, hide, the app switcher, Spotlight: taking any of these would
+    /// take them from every app, or do nothing, since macOS answers them
+    /// before this one sees them. ⌘W stays — closing a tab is what it is
+    /// for here (2 Oct 2026).
+    private static let macOS: Set<String> = ["cmd+q", "opt+cmd+q", "cmd+h", "opt+cmd+h", "cmd+tab", "shift+cmd+tab", "cmd+space"]
 
     private var byChord: [Chord: Command] = [:]
     private let store = Store.settings
@@ -394,6 +403,10 @@ final class Keys: ObservableObject {
         guard let chord = Chord(event: event) else { return true }
         let answer: Chord? = chord.key == "delete" && !chord.command && !chord.option && !chord.control ? nil : chord
         if let answer, !answer.usable { return true }
+        if let answer, Keys.macOS.contains(answer.text) {
+            reserved = answer
+            return true
+        }
         switch target {
         case .command(let command): set(answer, for: command)
         case .custom(let id): set(answer, forCustom: id)
@@ -462,7 +475,7 @@ struct ShortcutsPage: View {
     private func control(for target: Keys.Target, chord: Chord?, changed: Bool, reset: @escaping () -> Void) -> some View {
         HStack(spacing: 6) {
             if keys.recording == target {
-                Text("Press keys…")
+                Text(keys.reserved.map { "\($0.label) is macOS's — press another" } ?? "Press keys…")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
                 Pill("Cancel") { keys.recording = nil }
