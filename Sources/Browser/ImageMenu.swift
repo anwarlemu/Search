@@ -37,6 +37,9 @@ final class ImageRelay: NSObject, WKScriptMessageHandler {
         var el = e.target;
         while (el && el.tagName !== 'IMG') el = el.parentElement;
         if (!el || !el.currentSrc || el.naturalWidth < 2) return;
+        // A picture that is a link is a link first: WebKit's own menu has
+        // Open in New Tab and Copy Link, and this one has neither (2 Oct 2026).
+        if (el.closest('a[href]')) return;
         e.preventDefault();
         window.webkit.messageHandlers.officeImages.postMessage({ src: el.currentSrc });
       }, true);
