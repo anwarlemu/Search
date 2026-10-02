@@ -10,28 +10,37 @@ import Foundation
 enum Reader {
     static let script = """
     (function () {
-      function prose(el) {
-        var paragraphs = el.querySelectorAll('p');
-        if (paragraphs.length < 2) return 0;
-        var letters = 0;
-        for (var i = 0; i < paragraphs.length; i++) {
-          letters += (paragraphs[i].innerText || '').length;
+      // Each paragraph's letters, and each link, credited to every box above
+      // it in one walk up — rather than every box on the page asking for
+      // its paragraphs and reading each one's innerText, which laid the
+      // page out again per box and took seconds on a long one (2 Oct 2026).
+      function credit(tag, into, cap) {
+        var all = document.getElementsByTagName(tag);
+        var n = Math.min(all.length, cap);
+        for (var i = 0; i < n; i++) {
+          var worth = tag === 'p' ? (all[i].textContent || '').length : 1;
+          if (!worth) continue;
+          for (var el = all[i].parentElement; el && el !== document.body; el = el.parentElement) {
+            var had = into.get(el);
+            if (had) { had[0] += worth; had[1] += 1; } else { into.set(el, [worth, 1]); }
+          }
         }
-        if (letters < 400) return 0;
-        // A rail of related links has plenty of text and nothing to read.
-        var links = el.querySelectorAll('a').length;
-        return letters / (1 + links * 14);
       }
 
       function best() {
-        var candidates = document.querySelectorAll(
-          'article, main, [role="main"], .post, .entry, .article, .content, #content, div, section'
-        );
+        var prose = new Map(), links = new Map();
+        credit('p', prose, 4000);
+        credit('a', links, 8000);
+        var boxes = { DIV: 1, SECTION: 1, ARTICLE: 1, MAIN: 1 };
         var top = null, mark = 0;
-        for (var i = 0; i < candidates.length; i++) {
-          var score = prose(candidates[i]);
-          if (score > mark) { mark = score; top = candidates[i]; }
-        }
+        prose.forEach(function (had, el) {
+          if (!boxes[el.tagName] && el.getAttribute('role') !== 'main') return;
+          if (had[1] < 2 || had[0] < 400) return;
+          // A rail of related links has plenty of text and nothing to read.
+          var linked = links.get(el);
+          var score = had[0] / (1 + (linked ? linked[1] : 0) * 14);
+          if (score > mark) { mark = score; top = el; }
+        });
         return top;
       }
 
@@ -69,11 +78,18 @@ enum Reader {
       var heading = document.querySelector('h1');
       var title = (heading && heading.innerText.trim()) || document.title;
 
+      // Sized from the root, with the root put back to the browser's own
+      // default, so the type follows the browser's zoom and text size
+      // rather than whatever the page set its own root to. Dark with the
+      // Mac: a white page at night was the one thing on screen that was.
       var sheet = document.createElement('style');
+      sheet.id = 'office-reader-sheet';
       sheet.textContent = [
+        'html{font-size:100% !important}',
         'html,body{background:#fff !important;margin:0 !important;padding:0 !important}',
+        '#office-reader-home{display:none !important}',
         '#office-reader{max-width:38em;margin:0 auto;padding:72px 24px 160px;',
-        'font:400 18px/1.72 ui-serif,Georgia,"Times New Roman",serif;color:#171717}',
+        'font:400 1.125rem/1.72 ui-serif,Georgia,"Times New Roman",serif;color:#171717}',
         '#office-reader h1{font:600 30px/1.24 -apple-system,BlinkMacSystemFont,sans-serif;',
         'margin:0 0 8px;letter-spacing:-0.01em}',
         '#office-reader .office-from{font:400 12px/1 -apple-system,sans-serif;color:#a3a3a3;',
@@ -91,7 +107,11 @@ enum Reader {
         '#office-reader pre,#office-reader code{font-family:ui-monospace,monospace;font-size:14px}',
         '#office-reader pre{background:#f5f5f5;padding:14px;border-radius:8px;overflow:auto}',
         '#office-reader blockquote{margin:1.6em 0;padding-left:1.2em;',
-        'border-left:2px solid #e8e8e8;color:#555}'
+        'border-left:2px solid #e8e8e8;color:#555}',
+        // Last, so it wins over the daylight colours above at equal weight.
+        '@media (prefers-color-scheme:dark){html,body{background:#171717 !important}',
+        '#office-reader,#office-reader a{color:#e6e6e6}#office-reader pre{background:#262626}',
+        '#office-reader blockquote{border-color:#3a3a3a;color:#a8a8a8}}'
       ].join('');
 
       var wrap = document.createElement('div');
@@ -134,13 +154,36 @@ enum Reader {
       from.className = 'office-from';
       from.textContent = location.host.replace(/^www\\./, '');
 
-      document.body.innerHTML = '';
+      // The page is moved aside, not thrown away: its elements keep their
+      // listeners, so putting them back is the way out of reading mode
+      // without a reload (2 Oct 2026). Hidden by the sheet, not the
+      // attribute — a page's own display rule would beat `hidden`.
+      var home = document.createElement('div');
+      home.id = 'office-reader-home';
+      while (document.body.firstChild) home.appendChild(document.body.firstChild);
+      document.body.appendChild(home);
       document.head.appendChild(sheet);
       wrap.insertBefore(from, wrap.firstChild);
       wrap.insertBefore(top, wrap.firstChild);
       document.body.appendChild(wrap);
       window.scrollTo(0, 0);
       return 'read';
+    })();
+    """
+
+    /// The page as it was, the elements back in place. A page that moved
+    /// on in the meantime has nothing set aside, and is reloaded instead.
+    static let restore = """
+    (function () {
+      var home = document.getElementById('office-reader-home');
+      if (!home) { location.reload(); return 'reloaded'; }
+      var wrap = document.getElementById('office-reader');
+      if (wrap) wrap.remove();
+      var sheet = document.getElementById('office-reader-sheet');
+      if (sheet) sheet.remove();
+      while (home.firstChild) document.body.insertBefore(home.firstChild, home);
+      home.remove();
+      return 'restored';
     })();
     """
 }

@@ -534,7 +534,11 @@ struct SettingsPanel: View {
             }
             .disabled(updater.checking)
         case .fetching:
-            Ring(size: 12)
+            if updater.fetched > 0 {
+                ProgressView(value: updater.fetched).frame(width: 90).tint(Palette.ink)
+            } else {
+                Ring(size: 12)
+            }
         case .ready:
             Pill("Relaunch now", filled: true) { updater.relaunch() }
         case .offered(let next):

@@ -189,7 +189,9 @@ final class Bookmarks: ObservableObject {
             for i in nodes.indices {
                 if nodes[i].id == id {
                     if let title { nodes[i].title = title }
-                    if let url, !nodes[i].isFolder { nodes[i].url = url }
+                    // An extension's string is kept only when it is an
+                    // address: one that wasn't crashed the row that drew it.
+                    if let url, !nodes[i].isFolder, URL(string: url)?.host() != nil { nodes[i].url = url }
                     return true
                 }
                 guard var kids = nodes[i].children else { continue }
@@ -256,7 +258,7 @@ struct BookmarkOutline: View {
             Row(
                 node: node,
                 depth: depth,
-                open: node.isFolder ? nil : { open(URL(string: node.url!)!) },
+                open: node.isFolder ? nil : { node.url.flatMap(URL.init(string:)).map(open) },
                 isOpen: expanded.contains(node.id),
                 dragging: dragging == node.id,
                 toggle: node.isFolder ? { toggle(node.id) } : nil,
@@ -471,6 +473,11 @@ struct BookmarksPanel: View {
     @ObservedObject var browser: Browser
     @ObservedObject var bookmarks: Bookmarks
 
+    /// Found once as the panel opens, not on every draw of the tree.
+    @State private var sources: [Chromium.Source] = []
+    /// Which browser's file is being read, while it is.
+    @State private var importing: String?
+
     var body: some View {
         Plate("Bookmarks", width: 600, close: { browser.bookmarking = false }) {
             if bookmarks.isEmpty {
@@ -494,14 +501,34 @@ struct BookmarksPanel: View {
                 Text("Bring in from")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
-                ForEach(Chromium.installed()) { source in
-                    Pill(source.name) { browser.takeBookmarks(from: source) }
+                ForEach(sources) { source in
+                    Pill(source.name) {
+                        importing = source.name
+                        // Read off the main thread, as the passwords are, so
+                        // the pill can say it is busy rather than freeze.
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            let found = Chromium.bookmarks(in: source)
+                            DispatchQueue.main.async {
+                                importing = nil
+                                browser.takeBookmarks(from: source, found: found)
+                            }
+                        }
+                    }
+                    .disabled(importing != nil)
                 }
                 Spacer()
-                Text(bookmarks.count == 1 ? "1 bookmark" : "\(bookmarks.count) bookmarks")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
+                if let importing {
+                    Ring(size: 10)
+                    Text("Reading \(importing)…")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.muted)
+                } else {
+                    Text(bookmarks.count == 1 ? "1 bookmark" : "\(bookmarks.count) bookmarks")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                }
             }
         }
+        .onAppear { Chromium.installed { sources = $0 } }
     }
 }

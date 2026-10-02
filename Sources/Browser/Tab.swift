@@ -143,9 +143,8 @@ final class Tab: ObservableObject, Identifiable {
     /// True while the page has been stripped back to its article.
     @Published private(set) var reader = false
 
-    /// Leaving reading mode reloads rather than putting the old markup back:
-    /// restoring the HTML gives you a page that looks right and does nothing,
-    /// because every listener the page had was thrown away with it.
+    /// Leaving reading mode puts the page's own elements back, listeners and
+    /// all — see Reader.restore.
     func toggleReader(_ done: @escaping (Bool) -> Void) {
         guard !isBlank else {
             done(false)
@@ -153,7 +152,7 @@ final class Tab: ObservableObject, Identifiable {
         }
         guard !reader else {
             reader = false
-            web.reload()
+            web.evaluateJavaScript(Reader.restore)
             done(true)
             return
         }

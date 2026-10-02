@@ -27,17 +27,26 @@ enum Notify {
         (() => {
           const H = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.\(NotifyRelay.name);
           if (!H) return;
-          let permission = "\(permission)", pending = [];
+          let permission = "\(permission)", pending = [], seq = 0;
+          // The ones shown, by number, so a click on the Mac's banner can
+          // reach the page's own onclick — the thing a chat's notification
+          // is for. The number rides ahead of the tag, since the relay to
+          // the window carries a tag and nothing more. The last fifty.
+          const shown = new Map();
           class N extends EventTarget {
             constructor(title, options) {
               super();
               options = options || {};
               this.title = String(title); this.body = String(options.body || ""); this.tag = String(options.tag || "");
               this.icon = String(options.icon || ""); this.data = options.data; this.onclick = this.onclose = this.onerror = this.onshow = null;
-              if (permission === "granted") H.postMessage({ show: { title: this.title, body: this.body, tag: this.tag } });
-              else setTimeout(() => this.dispatchEvent(new Event("error")), 0);
+              this.id = ++seq;
+              if (permission === "granted") {
+                shown.set(this.id, this);
+                if (shown.size > 50) shown.delete(shown.keys().next().value);
+                H.postMessage({ show: { title: this.title, body: this.body, tag: this.id + "\\u0001" + this.tag } });
+              } else setTimeout(() => this.dispatchEvent(new Event("error")), 0);
             }
-            close() {}
+            close() { shown.delete(this.id); }
             static get permission() { return permission; }
             static get maxActions() { return 0; }
             static requestPermission(callback) {
@@ -51,6 +60,14 @@ enum Notify {
             }
           }
           window.__officeNotify = (answer) => { permission = answer; const list = pending; pending = []; list.forEach((r) => r(answer)); };
+          window.__officeNotifyClick = (id) => {
+            const n = shown.get(id);
+            if (!n) return;
+            shown.delete(id);
+            const e = new Event("click");
+            n.dispatchEvent(e);
+            if (typeof n.onclick === "function") n.onclick(e);
+          };
           Object.defineProperty(window, "Notification", { value: N, configurable: true, writable: true });
         })();
         """
@@ -77,13 +94,22 @@ enum Notify {
             didReceive response: UNNotificationResponse,
             withCompletionHandler done: @escaping () -> Void
         ) {
-            let id = response.notification.request.content.userInfo["tab"] as? String
+            let info = response.notification.request.content.userInfo
+            let id = info["tab"] as? String
+            let number = info["id"] as? Int
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     if let id = id.flatMap(UUID.init), let browser = Clicks.shared.browser, let tab = browser.tab(id) {
                         browser.reveal(tab)
                         NSApp.activate(ignoringOtherApps: true)
                         Links.window?.makeKeyAndOrderFront(nil)
+                        // And the page's own onclick, which is where a chat
+                        // opens the thread the banner was about. The page's
+                        // main frame only: one sent from inside a frame is
+                        // revealed but not clicked (2 Oct 2026).
+                        if let number {
+                            tab.built?.evaluateJavaScript("window.__officeNotifyClick && window.__officeNotifyClick(\(number))")
+                        }
                     }
                     done()
                 }
@@ -139,6 +165,10 @@ extension Browser {
               // bare build run from the terminal has none, and asking crashes.
               Bundle.main.bundleIdentifier != nil
         else { return }
+        // The page's number for it rides ahead of the tag; see the script.
+        let parts = tag.split(separator: "\u{1}", maxSplits: 1, omittingEmptySubsequences: false)
+        let number = parts.count == 2 ? Int(parts[0]) : nil
+        let tag = parts.count == 2 ? String(parts[1]) : tag
         let center = UNUserNotificationCenter.current()
         Notify.Clicks.shared.browser = self
         center.delegate = Notify.Clicks.shared
@@ -149,6 +179,7 @@ extension Browser {
             content.body = body
             content.subtitle = host
             content.userInfo = ["tab": tab.id.uuidString]
+            if let number { content.userInfo["id"] = number }
             let id = tag.isEmpty ? UUID().uuidString : "\(host).\(tag)"
             center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
         }

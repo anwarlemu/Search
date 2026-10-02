@@ -37,6 +37,9 @@ final class ImageRelay: NSObject, WKScriptMessageHandler {
         var el = e.target;
         while (el && el.tagName !== 'IMG') el = el.parentElement;
         if (!el || !el.currentSrc || el.naturalWidth < 2) return;
+        // A picture that is a link is a link first: WebKit's own menu has
+        // Open in New Tab and Copy Link, and this one has neither (2 Oct 2026).
+        if (el.closest('a[href]')) return;
         e.preventDefault();
         window.webkit.messageHandlers.officeImages.postMessage({ src: el.currentSrc });
       }, true);
@@ -71,7 +74,7 @@ extension Browser {
         })
         menu.addItem(.separator())
         menu.addItem(ImageMenuItem("Copy Image") { [weak self] in
-            self?.copyImage(at: url)
+            self?.copyImage(at: url, from: tab)
         })
         menu.addItem(ImageMenuItem("Download Image") { [weak self] in
             self?.downloadImage(at: url, from: webView)
@@ -93,9 +96,22 @@ extension Browser {
     /// one — an NSImage hands a receiving app real bytes to choose from
     /// (TIFF, PNG, whatever it asks for), which is the thing a pasteboard
     /// promise doesn't always give it back on a paste.
-    func copyImage(at url: URL) {
+    ///
+    /// Asked as the page asked: with the page's cookies for the image's own
+    /// address and the page as referer. Without them a picture behind a
+    /// sign-in, or on a site that checks where a request came from, came
+    /// back as a sign-in page or a 403 (2 Oct 2026).
+    func copyImage(at url: URL, from tab: Tab) {
+        let jar = tab.built?.configuration.websiteDataStore.httpCookieStore
+        let page = tab.address
         Task {
-            guard let (data, _) = try? await URLSession.shared.data(from: url),
+            var request = URLRequest(url: url)
+            let cookies = (await jar?.allCookies() ?? []).filter { Favicons.cookie($0, goesTo: url) }
+            for (field, value) in HTTPCookie.requestHeaderFields(with: cookies) {
+                request.setValue(value, forHTTPHeaderField: field)
+            }
+            if let page { request.setValue(page.absoluteString, forHTTPHeaderField: "Referer") }
+            guard let (data, _) = try? await Favicons.session.data(for: request),
                   let image = NSImage(data: data)
             else {
                 announce("Couldn't copy that image")

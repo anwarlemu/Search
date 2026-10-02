@@ -69,6 +69,15 @@ enum Chromium {
         known.filter { !$0.files.isEmpty }
     }
 
+    /// The same, found off the main thread — a profile folder can hold
+    /// thousands of entries — and handed back on it.
+    static func installed(then done: @escaping ([Source]) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let found = installed()
+            DispatchQueue.main.async { done(found) }
+        }
+    }
+
     enum Trouble: Error {
         case noPassphrase
         case unreadable

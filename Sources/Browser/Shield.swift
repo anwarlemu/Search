@@ -1,3 +1,4 @@
+import CryptoKit
 import WebKit
 
 // The ad blocker. No settings, no counter, no shield icon going green — it is
@@ -80,6 +81,8 @@ final class Shield: ObservableObject {
         "mixpanel.com", "amplitude.com", "segment.com", "segment.io",
         "branch.io", "appsflyer.com", "adjust.com", "analytics.tiktok.com",
         "connect.facebook.net", "ads-twitter.com", "analytics.twitter.com",
+        "bat.bing.com", "demdex.net", "bluekai.com", "rlcdn.com", "adsafeprotected.com",
+        "media.net", "ads.linkedin.com", "ct.pinterest.com", "sc-static.net",
     ]
 
     /// The few slots that are reliably an advertisement and nothing else. Kept
@@ -121,22 +124,42 @@ final class Shield: ObservableObject {
             trouble = "WebKit has nowhere to compile it"
             return
         }
-        store.compileContentRuleList(
-            forIdentifier: "office-shield",
-            encodedContentRuleList: json
-        ) { [weak self] compiled, error in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                guard let compiled else {
-                    self.trouble = error?.localizedDescription ?? "Compiling the block list failed"
-                    return
+        // WebKit keeps a compiled list between launches, so it is looked up
+        // before it is compiled: compiling cost every launch a parse of the
+        // whole list. Compiled again only when the rules here are not the
+        // ones it was compiled from, told apart by a digest (2 Oct 2026).
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let build = { [weak self] in
+            store.compileContentRuleList(forIdentifier: Shield.name, encodedContentRuleList: json) { compiled, error in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    guard let compiled else {
+                        self.trouble = error?.localizedDescription ?? "Compiling the block list failed"
+                        return
+                    }
+                    Store.settings.set(digest, forKey: "shield.rules")
+                    self.took(compiled)
                 }
-                self.list = compiled
-                // Tabs that opened while this was still compiling get it now.
-                if self.enabled { self.waiting.forEach { $0.add(compiled); self.mark($0, true) } }
-                self.waiting = []
             }
         }
+        guard Store.settings.string(forKey: "shield.rules") == digest else {
+            build()
+            return
+        }
+        store.lookUpContentRuleList(forIdentifier: Shield.name) { [weak self] found, _ in
+            MainActor.assumeIsolated {
+                if let found { self?.took(found) } else { build() }
+            }
+        }
+    }
+
+    private static let name = "office-shield"
+
+    private func took(_ compiled: WKContentRuleList) {
+        list = compiled
+        // Tabs that opened while this was still compiling get it now.
+        if enabled { waiting.forEach { $0.add(compiled); mark($0, true) } }
+        waiting = []
     }
 
     /// Every tab asks for it; whoever asks before it is ready is remembered.

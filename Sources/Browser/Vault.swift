@@ -63,13 +63,22 @@ enum Vault {
     /// on the page you saved it from — accounts.example.com asks, and the
     /// password was kept for example.com. So the site is matched as a site:
     /// the host first, then anything sharing its registrable domain.
-    static func logins(matching host: String) -> [Login] {
+    ///
+    /// Ordered and cut to `limit` on the attributes alone, before any secret
+    /// is read: each secret is its own trip to securityd, and a list that
+    /// shows five was paying for every account on the domain (2 Oct 2026).
+    static func logins(matching host: String, limit: Int? = nil) -> [Login] {
         let domain = registrable(host)
-        let exact = logins(for: host)
-        let wider = rows(where: [:])
-            .filter { ($0[kSecAttrServer as String] as? String).map { $0 != host && registrable($0) == domain } ?? false }
-            .compactMap(login(from:))
-        return (exact + wider).sorted { ($0.used ?? .distantPast) > ($1.used ?? .distantPast) }
+        let site = rows(where: [:]).filter { row in
+            (row[kSecAttrServer as String] as? String).map { $0 == host || registrable($0) == domain } ?? false
+        }
+        let ordered = site.sorted {
+            let (a, b) = (used(in: $0) ?? .distantPast, used(in: $1) ?? .distantPast)
+            if a != b { return a > b }
+            let (x, y) = ($0[kSecAttrServer as String] as? String == host, $1[kSecAttrServer as String] as? String == host)
+            return x && !y
+        }
+        return (limit.map { Array(ordered.prefix($0)) } ?? ordered).compactMap(login(from:))
     }
 
     /// Everything this app holds, for the list. Read on demand and never kept
@@ -103,22 +112,26 @@ enum Vault {
         return rows
     }
 
-    /// One item's secret, by the two things that name it.
+    /// One item's secret, by the two things that name it. Under either
+    /// label: a password kept before the rename was listed but never read,
+    /// because this asked for the new label only (2 Oct 2026).
     private static func secret(host: String, user: String) -> String? {
-        var out: CFTypeRef?
-        let status = SecItemCopyMatching([
-            kSecClass as String: kSecClassInternetPassword,
-            kSecAttrLabel as String: label,
-            kSecAttrServer as String: host,
-            kSecAttrAccount as String: user,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ] as CFDictionary, &out)
-        guard status == errSecSuccess, let data = out as? Data else {
+        for label in [label, formerLabel] {
+            var out: CFTypeRef?
+            let status = SecItemCopyMatching([
+                kSecClass as String: kSecClassInternetPassword,
+                kSecAttrLabel as String: label,
+                kSecAttrServer as String: host,
+                kSecAttrAccount as String: user,
+                kSecReturnData as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne,
+            ] as CFDictionary, &out)
+            if status == errSecSuccess, let data = out as? Data {
+                return String(data: data, encoding: .utf8)
+            }
             if status != errSecItemNotFound { NSLog("Vault: keychain read failed (%d)", status) }
-            return nil
         }
-        return String(data: data, encoding: .utf8)
+        return nil
     }
 
     private static func login(from row: [String: Any]) -> Login? {
@@ -126,10 +139,12 @@ enum Vault {
               let user = row[kSecAttrAccount as String] as? String,
               let password = secret(host: host, user: user)
         else { return nil }
-        // The keychain has no "last used" of its own; it rides in the comment.
-        let used = (row[kSecAttrComment as String] as? String)
-            .flatMap(Double.init).map(Date.init(timeIntervalSince1970:))
-        return Login(host: host, user: user, password: password, used: used)
+        return Login(host: host, user: user, password: password, used: used(in: row))
+    }
+
+    /// The keychain has no "last used" of its own; it rides in the comment.
+    private static func used(in row: [String: Any]) -> Date? {
+        (row[kSecAttrComment as String] as? String).flatMap(Double.init).map(Date.init(timeIntervalSince1970:))
     }
 
     // MARK: - writing
@@ -219,8 +234,23 @@ enum Vault {
         if seconds.contains(labels[labels.count - 2]), labels[labels.count - 1].count == 2 {
             return labels.suffix(3).joined(separator: ".")
         }
+        if shared.contains(labels.suffix(2).joined(separator: ".")) {
+            return labels.suffix(3).joined(separator: ".")
+        }
         return labels.suffix(2).joined(separator: ".")
     }
+
+    /// Hosts that lend a name to anyone: every tenant under one is a site
+    /// of its own, and one's password must never be offered on another's.
+    /// Collapsed to github.io, a login for one project was offered on every
+    /// project page (2 Oct 2026).
+    private static let shared: Set<String> = [
+        "github.io", "gitlab.io", "vercel.app", "pages.dev", "workers.dev", "netlify.app",
+        "herokuapp.com", "fly.dev", "onrender.com", "railway.app", "web.app", "firebaseapp.com",
+        "azurewebsites.net", "cloudfront.net", "amazonaws.com", "ngrok.io", "ngrok-free.app",
+        "repl.co", "glitch.me", "surge.sh", "webflow.io", "wixsite.com", "blogspot.com",
+        "wordpress.com", "tumblr.com", "notion.site", "myshopify.com", "substack.com", "hf.space",
+    ]
 
     static func host(of text: String) -> String {
         var value = text.trimmingCharacters(in: .whitespaces)

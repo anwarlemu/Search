@@ -87,11 +87,18 @@ final class Float {
 
         let size = NSSize(width: 440, height: 247)
         let screen = NSScreen.main?.visibleFrame ?? .zero
-        let spot = NSRect(
-            x: screen.maxX - size.width - 24,
-            y: screen.minY + 24,
-            width: size.width,
-            height: size.height
+        // Where it was last left, if it fits the screen it is on now; the
+        // bottom right corner the first time. Opening at the one size in
+        // the one corner, every time, undid the sizing and moving you did
+        // the time before (2 Oct 2026).
+        let spot = Float.fit(
+            Store.settings.string(forKey: Float.frameKey).map(NSRectFromString) ?? NSRect(
+                x: screen.maxX - size.width - 24,
+                y: screen.minY + 24,
+                width: size.width,
+                height: size.height
+            ),
+            on: screen
         )
 
         let panel = Panel(
@@ -116,7 +123,7 @@ final class Float {
         panel.aspectRatio = size
         panel.minSize = NSSize(width: 260, height: 146)
 
-        let ground = NSView(frame: NSRect(origin: .zero, size: size))
+        let ground = NSView(frame: NSRect(origin: .zero, size: spot.size))
         ground.wantsLayer = true
         ground.layer?.backgroundColor = NSColor.black.cgColor
         ground.layer?.cornerRadius = 14
@@ -152,6 +159,7 @@ final class Float {
         controls.onSkip = { [weak self] seconds in self?.onSkip?(seconds) }
         controls.onSeek = { [weak self] seconds in self?.onSeek?(seconds) }
         controls.onCaptions = { [weak self] on in self?.onCaptions?(on) }
+        controls.onNear = { [weak self] in self?.tick() }
         ground.addSubview(controls)
         self.controls = controls
 
@@ -159,6 +167,17 @@ final class Float {
         self.panel = panel
         ticks = 0
         lastDuration = -1
+
+        // The window takes the video's own shape once the page says what it
+        // is; 16:9 until then. A film in a 16:9 window is fine; a portrait
+        // clip or a 4:3 call in one was two bars and a small picture
+        // (2 Oct 2026).
+        (page as? WKWebView)?.evaluateJavaScript(Isolate.shape) { [weak self] answer, _ in
+            MainActor.assumeIsolated {
+                guard let pair = answer as? [Double], pair.count == 2 else { return }
+                self?.shape(width: pair[0], height: pair[1])
+            }
+        }
 
         ticker = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -174,33 +193,70 @@ final class Float {
                     return
                 }
 
-                self.onProgress? { state in
-                    guard let controls = self.controls else { return }
-                    controls.progress = state.through
-                    controls.playing = state.playing
-                    controls.time = state.time
-                    controls.caption = state.caption
-                    controls.chapter = state.chapter
-                    controls.captions = (state.captions, state.captionsOn)
-                    // The list once at the start, again every ten seconds —
-                    // a description arrives after the video does — and at
-                    // once when the video changes under the window, as the
-                    // next in a playlist does.
-                    let changed = abs(state.duration - self.lastDuration) > 0.5
-                    if self.ticks % 20 == 0 || changed {
-                        self.lastDuration = state.duration
-                        self.onChapters? { list in self.controls?.chapters = list }
-                    }
-                    self.ticks += 1
-                }
+                // The line and the caption are only drawn while the pointer
+                // is over the window; asked anyway, the page ran a script
+                // twice a second for nobody (2 Oct 2026).
+                if self.controls?.near == true { self.tick() }
             }
         }
+    }
+
+    /// The window reshaped to the video, keeping its width and its place.
+    private func shape(width: Double, height: Double) {
+        guard let panel, width > 0, height > 0 else { return }
+        panel.aspectRatio = NSSize(width: width, height: height)
+        let was = panel.frame
+        let tall = was.width * height / width
+        guard abs(tall - was.height) > 1 else { return }
+        let screen = NSScreen.main?.visibleFrame ?? was
+        panel.setFrame(Float.fit(NSRect(x: was.minX, y: was.minY, width: was.width, height: tall), on: screen), display: true)
+    }
+
+    /// Asks the page where it is, for the line and the pause button.
+    private func tick() {
+        onProgress? { [weak self] state in
+            guard let self, let controls = self.controls else { return }
+            controls.progress = state.through
+            controls.playing = state.playing
+            controls.time = state.time
+            controls.caption = state.caption
+            controls.chapter = state.chapter
+            controls.captions = (state.captions, state.captionsOn)
+            // The list once at the start, again every ten seconds — a
+            // description arrives after the video does — and at once when
+            // the video changes under the window, as the next in a playlist
+            // does.
+            let changed = abs(state.duration - self.lastDuration) > 0.5
+            if self.ticks % 20 == 0 || changed {
+                self.lastDuration = state.duration
+                self.onChapters? { list in self.controls?.chapters = list }
+            }
+            self.ticks += 1
+        }
+    }
+
+    private static let frameKey = "float.frame"
+
+    /// `frame`, moved and if need be shrunk until it sits on `screen`. A
+    /// window remembered from a larger display must not open off the edge
+    /// of a smaller one.
+    private static func fit(_ frame: NSRect, on screen: NSRect) -> NSRect {
+        guard frame.width > 0, frame.height > 0, screen.width > 0 else { return frame }
+        var out = frame
+        let room = min(screen.width, screen.height * frame.width / frame.height) * 0.85
+        if out.width > room {
+            out.size = NSSize(width: room, height: room * frame.height / frame.width)
+        }
+        out.origin.x = min(max(screen.minX, out.minX), screen.maxX - out.width)
+        out.origin.y = min(max(screen.minY, out.minY), screen.maxY - out.height)
+        return out
     }
 
     /// Puts the page down and closes. Whoever owns the page takes it back on
     /// their next layout.
     func drop() {
         guard let panel else { return }
+        Store.settings.set(NSStringFromRect(panel.frame), forKey: Float.frameKey)
         ticker?.invalidate()
         ticker = nil
         (page as? WKWebView)?.allowsMagnification = true
@@ -224,6 +280,9 @@ final class Float {
         var onSkip: ((Double) -> Void)?
         var onSeek: ((Double) -> Void)?
         var onCaptions: ((Bool) -> Void)?
+        /// The pointer just arrived: the line is about to show, so it is
+        /// brought up to date at once rather than at the next tick.
+        var onNear: (() -> Void)?
 
         var playing = true {
             didSet { pause.image = glyph(playing ? "pause.fill" : "play.fill", 17) }
@@ -280,7 +339,8 @@ final class Float {
         private let words = NSTextField(wrappingLabelWithString: "")
         private let scrim = CAGradientLayer()
         private let line = Line()
-        private var near = false
+        /// Whether the pointer is over the window, and so the controls shown.
+        private(set) var near = false
 
         override init(frame: NSRect) {
             super.init(frame: frame)
@@ -477,6 +537,7 @@ final class Float {
 
         private func fade(to value: CGFloat) {
             near = value > 0
+            if near { onNear?() }
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.16
                 buttons.forEach { $0.animator().alphaValue = value }
@@ -831,6 +892,16 @@ enum Isolate {
         })();
         """
     }
+
+    /// The picture's own width and height in pixels, or two noughts.
+    static let shape = """
+    (function () {
+      var video = document.querySelector('[data-office-float]')
+        || document.querySelector('video');
+      if (!video || !video.videoWidth || !video.videoHeight) return [0, 0];
+      return [video.videoWidth, video.videoHeight];
+    })();
+    """
 
     /// How far through and whether it is running — and the caption of the
     /// moment, the chapter, and whether there are captions to be had.

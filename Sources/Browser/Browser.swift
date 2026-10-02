@@ -258,8 +258,8 @@ final class Browser: NSObject, ObservableObject {
     /// icons it had for those sites, so the menu wears them from the start
     /// instead of a letter each. Returns how many pages came over.
     @discardableResult
-    func takeBookmarks(from source: Chromium.Source) -> Int {
-        let found = Chromium.bookmarks(in: source)
+    func takeBookmarks(from source: Chromium.Source, found: [Bookmark]? = nil) -> Int {
+        let found = found ?? Chromium.bookmarks(in: source)
         bookmarks.take(found, from: source.name)
         let count = Bookmarks.count(found)
         announce(count == 0 ? "No bookmarks in \(source.name)" : "\(count) bookmarks from \(source.name)")
@@ -1693,7 +1693,7 @@ final class Browser: NSObject, ObservableObject {
                   let host = curtain.host(of: tab.address)
             else { return }
             let ask = fieldAsk
-            Vault.off({ Array(Vault.logins(matching: host).prefix(5)) }) { [weak self, weak tab] known in
+            Vault.off({ Vault.logins(matching: host, limit: 5) }) { [weak self, weak tab] known in
                 guard let self, let tab, ask == fieldAsk, tab.id == activeID, pickedInto != tab.id else { return }
                 suggesting = known.isEmpty ? nil : Suggesting(tab: tab.id, spot: spot, logins: known)
             }

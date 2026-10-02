@@ -18,6 +18,10 @@ final class Favicons {
     var arrived: ((String, NSImage) -> Void)?
 
     private var memory: [String: NSImage] = [:]
+    /// Keys with no file on disk, so a host without an icon is not asked of
+    /// the disk again on every row that draws it. Forgotten the moment an
+    /// icon for the key arrives (2 Oct 2026).
+    private var absent: Set<String> = []
     private var busy: Set<String> = []
     /// Hosts that had no icon to give, and when: asked again after a while,
     /// not never — one dropped connection used to leave a site a letter for
@@ -60,10 +64,25 @@ final class Favicons {
 
     private func known(_ key: String) -> NSImage? {
         if let hit = memory[key] { return hit }
-        guard let image = NSImage(contentsOf: Favicons.file(key)) else { return nil }
+        if absent.contains(key) { return nil }
+        guard let image = NSImage(contentsOf: Favicons.file(key)) else {
+            absent.insert(key)
+            return nil
+        }
         memory[key] = image
         return image
     }
+
+    /// One session for every icon, with no cookie jar of its own: each
+    /// request carries only the page's cookies for its own address, set
+    /// below. A session per download was never invalidated, and each kept
+    /// its threads (2 Oct 2026).
+    static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 8
+        config.httpShouldSetCookies = false
+        return URLSession(configuration: config)
+    }()
 
     private static func fresh(_ key: String) -> Bool {
         guard let stamp = try? file(key).resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
@@ -87,6 +106,7 @@ final class Favicons {
     func adopt(_ data: Data, for host: String) async {
         guard cached(host) == nil, let image = await Favicons.square(data) else { return }
         memory[host] = image
+        absent.remove(host)
         Favicons.keep(image, for: host)
         arrived?(host, image)
     }
@@ -149,25 +169,19 @@ final class Favicons {
     private func download(_ candidates: [URL], host: String, key: String, shy: Bool, jar: WKHTTPCookieStore?) async {
         defer { busy.remove(host) }
         let cookies = await jar?.allCookies() ?? []
-        let session = URLSession(configuration: {
-            let config = URLSessionConfiguration.ephemeral
-            config.timeoutIntervalForRequest = 8
-            // Each request carries only the cookies its own address would.
-            config.httpShouldSetCookies = false
-            return config
-        }())
         for candidate in candidates {
             var request = URLRequest(url: candidate)
             let mine = cookies.filter { Favicons.cookie($0, goesTo: candidate) }
             for (field, value) in HTTPCookie.requestHeaderFields(with: mine) {
                 request.setValue(value, forHTTPHeaderField: field)
             }
-            guard let (data, response) = try? await session.data(for: request),
+            guard let (data, response) = try? await Favicons.session.data(for: request),
                   (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true,
                   data.count > 60, data.count < 2_000_000
             else { continue }
             guard let image = await Favicons.square(data) else { continue }
             memory[key] = image
+            absent.remove(key)
             // Kept under the address the page first asked for, whichever
             // candidate answered, so the next visit declaring the same one
             // recognises it.
@@ -183,8 +197,8 @@ final class Favicons {
 
     /// Whether a browser would send this cookie to this address: its domain
     /// matches the host, its path is under the address's, and a secure one
-    /// only over https.
-    private static func cookie(_ cookie: HTTPCookie, goesTo url: URL) -> Bool {
+    /// only over https. Copying an image asks the same question.
+    static func cookie(_ cookie: HTTPCookie, goesTo url: URL) -> Bool {
         guard let host = url.host()?.lowercased() else { return false }
         if cookie.isSecure, url.scheme != "https" { return false }
         let domain = cookie.domain.lowercased()
