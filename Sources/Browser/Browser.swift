@@ -672,11 +672,6 @@ final class Browser: NSObject, ObservableObject {
         announce("History cleared")
     }
 
-    /// The last few places, for the History menu.
-    var recentlyVisited: [History.Trace] {
-        history.recent(8)
-    }
-
     // MARK: - the camera and the microphone
 
     /// A page asking to see or hear you, waiting for an answer. WebKit hands
@@ -943,11 +938,9 @@ final class Browser: NSObject, ObservableObject {
         Updater.shared.checkIfDue { [weak self] line in self?.announce(line) }
         FormRelay.passkeysOffered = prefs.passkeys
 
-        // The History menu lists what the history holds, and the menu is drawn
-        // from this object's changes — so the history's are passed on.
-        history.objectWillChange
-            .sink { [weak self] in self?.objectWillChange.send() }
-            .store(in: &bag)
+        // The history's own changes are not passed on: every page that
+        // loaded had the whole window redrawn for a menu nobody had open.
+        // The History menu's list watches the history itself (2 Oct 2026).
         bookmarks.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &bag)
@@ -1090,7 +1083,6 @@ final class Browser: NSObject, ObservableObject {
     private func beginPrivate() {
         profileNames = ["Private"]
         welcoming = false
-        history.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         bookmarks.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         prefs.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         keys.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)

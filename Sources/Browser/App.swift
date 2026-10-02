@@ -180,15 +180,7 @@ struct BrowserApp: App {
                 BookmarkTree(nodes: current.bookmarks.roots) { current.visit($0) }
             }
             CommandMenu("History") {
-                Section("Recently Visited") {
-                    ForEach(current.recentlyVisited) { trace in
-                        Button {
-                            current.open(trace.url, foreground: true)
-                        } label: {
-                            MenuLine(title: trace.title.isEmpty ? trace.key : trace.title, url: trace.url)
-                        }
-                    }
-                }
+                RecentlyVisited(history: current.history) { current.open($0, foreground: true) }
                 if !current.ghosts.isEmpty {
                     Section("Recently Closed") {
                         ForEach(current.ghosts.reversed().prefix(10)) { ghost in
@@ -277,6 +269,26 @@ private struct BookmarkTree: View {
                 }
             } else if let text = node.url, let url = URL(string: text) {
                 Button(node.title) { open(url) }
+            }
+        }
+    }
+}
+
+/// The last few places, for the History menu. Watches the history itself,
+/// so a page loading redraws these few lines and not the window they hang
+/// off (2 Oct 2026).
+private struct RecentlyVisited: View {
+    @ObservedObject var history: History
+    let open: (URL) -> Void
+
+    var body: some View {
+        Section("Recently Visited") {
+            ForEach(history.recent(8)) { trace in
+                Button {
+                    open(trace.url)
+                } label: {
+                    MenuLine(title: trace.title.isEmpty ? trace.key : trace.title, url: trace.url)
+                }
             }
         }
     }
