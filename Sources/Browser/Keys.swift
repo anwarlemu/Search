@@ -39,7 +39,12 @@ struct Chord: Hashable {
         if let name = Chord.named[event.keyCode] {
             key = name
         } else {
-            guard var text = event.charactersIgnoringModifiers?.lowercased(), text.count == 1 else { return nil }
+            // "Ignoring modifiers" keeps ⇧, so ⇧⌘] arrived as "}" and never
+            // matched "shift+cmd+]". The key with nothing held is the one
+            // the map is written in; the flags below carry the ⇧ (2 Oct 2026).
+            let plain = event.characters(byApplyingModifiers: [])
+            guard var text = (plain?.count == 1 ? plain : event.charactersIgnoringModifiers)?.lowercased(),
+                  text.count == 1 else { return nil }
             // ⌘+ arrives as "=" or "+" depending on the keyboard: one key.
             if text == "+" { text = "=" }
             key = text
