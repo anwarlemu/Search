@@ -601,8 +601,23 @@ final class Extensions: NSObject, ObservableObject {
             }
             unload(item.id)
             let target = Extensions.folder(for: item.id)
-            try? FileManager.default.removeItem(at: target)
-            try FileManager.default.moveItem(at: staged, to: target)
+            do {
+                // The new folder takes the old one's place in one step, the
+                // old going only once the new is there. Deleted first, a
+                // move that then failed left no extension at all, and only
+                // the log knew (2 Oct 2026).
+                if FileManager.default.fileExists(atPath: target.path) {
+                    _ = try FileManager.default.replaceItemAt(target, withItemAt: staged, backupItemName: nil, options: [])
+                } else {
+                    try FileManager.default.moveItem(at: staged, to: target)
+                }
+            } catch {
+                try? FileManager.default.removeItem(at: staged)
+                noteError("the update to \(found.version ?? version) couldn't be put in place: \(error.localizedDescription)", for: item.id)
+                browser?.announce("Couldn't update \(item.name)")
+                if item.enabled { await load(item) }
+                return
+            }
             if let index = installed.firstIndex(where: { $0.id == item.id }) {
                 installed[index].version = found.version ?? version
                 installed[index].permissions = wants.sorted()
@@ -610,7 +625,7 @@ final class Extensions: NSObject, ObservableObject {
                 if installed[index].enabled { await load(installed[index]) }
             }
         } catch {
-            NSLog("Extensions: update of %@ failed: %@", item.id, error.localizedDescription)
+            noteError("the update to \(version) failed: \(error.localizedDescription)", for: item.id)
         }
     }
 
