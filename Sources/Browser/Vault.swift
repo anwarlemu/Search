@@ -223,8 +223,23 @@ enum Vault {
         if seconds.contains(labels[labels.count - 2]), labels[labels.count - 1].count == 2 {
             return labels.suffix(3).joined(separator: ".")
         }
+        if shared.contains(labels.suffix(2).joined(separator: ".")) {
+            return labels.suffix(3).joined(separator: ".")
+        }
         return labels.suffix(2).joined(separator: ".")
     }
+
+    /// Hosts that lend a name to anyone: every tenant under one is a site
+    /// of its own, and one's password must never be offered on another's.
+    /// Collapsed to github.io, a login for one project was offered on every
+    /// project page (2 Oct 2026).
+    private static let shared: Set<String> = [
+        "github.io", "gitlab.io", "vercel.app", "pages.dev", "workers.dev", "netlify.app",
+        "herokuapp.com", "fly.dev", "onrender.com", "railway.app", "web.app", "firebaseapp.com",
+        "azurewebsites.net", "cloudfront.net", "amazonaws.com", "ngrok.io", "ngrok-free.app",
+        "repl.co", "glitch.me", "surge.sh", "webflow.io", "wixsite.com", "blogspot.com",
+        "wordpress.com", "tumblr.com", "notion.site", "myshopify.com", "substack.com", "hf.space",
+    ]
 
     static func host(of text: String) -> String {
         var value = text.trimmingCharacters(in: .whitespaces)
