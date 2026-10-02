@@ -1599,9 +1599,19 @@ final class Browser: NSObject, ObservableObject {
                     if !quietly { self.announce("Nothing is playing here") }
                     return
                 }
+                // The page answered a moment late. Back on this tab by then,
+                // or the little window taken by another, or the page gone:
+                // the video is put back where it was rather than lifted out
+                // from under you, which left the stage blank (2 Oct 2026).
+                guard let web = tab.built, !tab.asleep, !self.floater.showing, self.floating == nil,
+                      !(quietly && tab.id == self.activeID)
+                else {
+                    tab.built?.evaluateJavaScript(Isolate.off(pausing: false))
+                    return
+                }
                 self.floating = tab.id
                 tab.floating = true
-                self.floater.lift(tab.web)
+                self.floater.lift(web)
             }
         }
     }
