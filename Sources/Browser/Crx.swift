@@ -39,8 +39,12 @@ enum Crx {
 
     /// Thirty-two letters from a to p, wherever they are — a bare id, a store
     /// link, an old chrome.google.com/webstore link.
+    /// Compiled once: this is asked from Settings' body on every keystroke
+    /// in the field, and from the store bar on every pass (2 Oct 2026).
+    private static let idPattern = try! NSRegularExpression(pattern: "(?<![a-z])([a-p]{32})(?![a-z])")
+
     static func id(in text: String) -> String? {
-        let pattern = try! NSRegularExpression(pattern: "(?<![a-z])([a-p]{32})(?![a-z])")
+        let pattern = idPattern
         let range = NSRange(text.startIndex..., in: text)
         guard let match = pattern.firstMatch(in: text.lowercased(), range: range),
               let found = Range(match.range(at: 1), in: text)
