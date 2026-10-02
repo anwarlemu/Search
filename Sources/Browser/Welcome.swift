@@ -243,7 +243,11 @@ struct WelcomePanel: View {
             }
         }
         if wantsBookmarks {
-            lines.append("\(browser.takeBookmarks(from: source)) bookmarks")
+            group.enter()
+            browser.takeBookmarks(from: source) { count in
+                lines.append("\(count) bookmarks")
+                group.leave()
+            }
         }
         if wantsHistory {
             group.enter()

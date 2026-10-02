@@ -258,22 +258,28 @@ final class Browser: NSObject, ObservableObject {
 
     /// Another browser's bookmarks, folders and all — and, behind them, the
     /// icons it had for those sites, so the menu wears them from the start
-    /// instead of a letter each. Returns how many pages came over.
-    @discardableResult
-    func takeBookmarks(from source: Chromium.Source) -> Int {
-        let found = Chromium.bookmarks(in: source)
-        bookmarks.take(found, from: source.name)
-        let count = Bookmarks.count(found)
-        announce(count == 0 ? "No bookmarks in \(source.name)" : "\(count) bookmarks from \(source.name)")
-        let urls = Bookmarks.urls(found)
-        DispatchQueue.global(qos: .utility).async {
-            let icons = Chromium.icons(in: source, for: urls)
-            Task { @MainActor in
-                for (host, data) in icons { await Favicons.shared.adopt(data, for: host) }
-                self.objectWillChange.send()
+    /// instead of a letter each. The file is read and parsed off the main
+    /// thread — a few thousand bookmarks held the window while it was
+    /// (2 Oct 2026) — and `done` hears how many pages came over.
+    func takeBookmarks(from source: Chromium.Source, then done: ((Int) -> Void)? = nil) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let found = Chromium.bookmarks(in: source)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                bookmarks.take(found, from: source.name)
+                let count = Bookmarks.count(found)
+                announce(count == 0 ? "No bookmarks in \(source.name)" : "\(count) bookmarks from \(source.name)")
+                done?(count)
+                let urls = Bookmarks.urls(found)
+                DispatchQueue.global(qos: .utility).async {
+                    let icons = Chromium.icons(in: source, for: urls)
+                    Task { @MainActor in
+                        for (host, data) in icons { await Favicons.shared.adopt(data, for: host) }
+                        self.objectWillChange.send()
+                    }
+                }
             }
         }
-        return count
     }
 
     /// ⇧⌘S. The same tabs, down the left or across the top.
@@ -602,18 +608,28 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// The other browser's history, into this one's. Off the main thread for
-    /// the reading; the merge itself is a moment.
+    /// the reading; the merge, which has to be where the history lives, a
+    /// few hundred places at a time between frames rather than all of
+    /// them in one go (2 Oct 2026).
     func takePlaces(from source: Chromium.Source, then done: @escaping (Int) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             let places = Chromium.places(in: source)
-            DispatchQueue.main.async {
-                for place in places {
-                    self.history.take(place.url, title: place.title, count: place.count, last: place.last)
-                }
-                self.history.settle()
-                done(places.count)
-            }
+            DispatchQueue.main.async { [weak self] in self?.merge(places[...], then: done) }
         }
+    }
+
+    private func merge(_ places: ArraySlice<Chromium.Place>, then done: @escaping (Int) -> Void) {
+        let now = places.prefix(300)
+        for place in now {
+            history.take(place.url, title: place.title, count: place.count, last: place.last)
+        }
+        let rest = places.dropFirst(300)
+        guard !rest.isEmpty else {
+            history.settle()
+            done(places.endIndex)
+            return
+        }
+        DispatchQueue.main.async { [weak self] in self?.merge(rest, then: done) }
     }
 
     /// Takes in a CSV as Google Password Manager exports one. The file is read
