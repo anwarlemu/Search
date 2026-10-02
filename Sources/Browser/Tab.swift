@@ -763,7 +763,14 @@ final class Tab: ObservableObject, Identifiable {
     /// on — can still be pictured. Nil when there is nothing to draw.
     func snapshot(_ done: @escaping (Data?) -> Void) {
         guard let built else { return done(nil) }
-        built.takeSnapshot(with: nil) { image, _ in
+        // At the page's size in points, not in pixels: a Retina picture of
+        // a big window was four times the memory, for something shown for
+        // a second or two under a page being rebuilt (2 Oct 2026). Drawn
+        // without scaling, point for pixel, it still lands where the page
+        // was — see the cover in Stage.swift.
+        let shape = WKSnapshotConfiguration()
+        shape.snapshotWidth = NSNumber(value: Double(built.bounds.width / 2))
+        built.takeSnapshot(with: shape) { image, _ in
             guard let image, let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
                 return done(nil)
             }
