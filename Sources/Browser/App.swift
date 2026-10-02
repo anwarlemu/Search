@@ -921,7 +921,11 @@ struct ContentView: View {
             browser.visit(url)
             return true
         }
-        // ⌘← and ⌘→, for hands that never learned the brackets.
+        // ⌘← and ⌘→, for hands that never learned the brackets. Not while
+        // the caret is in something on the page: there they are the way to
+        // the start and end of a line, and leaving a form mid-word to go
+        // back a page is the last thing anyone meant (2 Oct 2026).
+        if browser.active?.typing == true { return false }
         if chord == Chord(key: "left", command: true) { browser.back(); return true }
         if chord == Chord(key: "right", command: true) { browser.forward(); return true }
         return false
