@@ -860,18 +860,26 @@ final class Tab: ObservableObject, Identifiable {
         // moment later and sit on its placeholder for good. Coming back to a
         // pinned tab after ⌘W is exactly that: select() asks for the view back
         // and wakes the page in the same breath, one synchronous step ahead of
-        // SwiftUI actually putting the view on screen. Bounded at about a
-        // second, so a wake with no stage waiting for it still loads rather
-        // than hanging on one that will never come.
-        // Only the first pass may build the view. Every later one — the
-        // waits below — finds the view that was there or gives up: a tab
-        // closed or put down in the meantime has none, and asking `web`
-        // built a fresh one, process and all, for nobody (2 Oct 2026).
+        // SwiftUI actually putting the view on screen. The view says when it
+        // has one — it was asked every twenty milliseconds instead (2 Oct
+        // 2026) — and a second's wait is the most it gets, so a wake with no
+        // stage waiting for it still loads rather than hanging on one that
+        // will never come.
+        // Only the first pass may build the view. The second — after the
+        // wait — finds the view that was there or gives up: a tab closed or
+        // put down in the meantime has none, and asking `web` built a fresh
+        // one, process and all, for nobody (2 Oct 2026).
         guard let view = tries == 0 ? web : built, pending == nil else { return }
-        if view.window == nil, tries < 50 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
-                self?.loadAndVerify(url, state: state, tries: tries + 1)
+        if view.window == nil, tries == 0 {
+            var waited = false
+            let go = { [weak self, weak view] in
+                guard !waited else { return }
+                waited = true
+                view?.onWindow = nil
+                self?.loadAndVerify(url, state: state, tries: 1)
             }
+            view.onWindow = go
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: go)
             return
         }
         // A tab that slept has its own history to go back to — the page, its
@@ -1035,6 +1043,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.removeAllUserScripts()
         web.onPull = nil
         web.onTouch = nil
+        web.onWindow = nil
         web.stopLoading()
         web.navigationDelegate = nil
         web.uiDelegate = nil
@@ -1128,6 +1137,14 @@ final class PageView: WKWebView {
     /// Told the moment the page is reached for — a click, a scroll — so the
     /// picture of a tab waking up never stands between you and the page.
     var onTouch: (() -> Void)?
+    /// Told once the view is in a window, for a load that has to wait for
+    /// one. See Tab.loadAndVerify.
+    var onWindow: (() -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { onWindow?() }
+    }
 
     override func mouseDown(with event: NSEvent) {
         onTouch?()
