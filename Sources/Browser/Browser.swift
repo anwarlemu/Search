@@ -256,8 +256,8 @@ final class Browser: NSObject, ObservableObject {
     /// icons it had for those sites, so the menu wears them from the start
     /// instead of a letter each. Returns how many pages came over.
     @discardableResult
-    func takeBookmarks(from source: Chromium.Source) -> Int {
-        let found = Chromium.bookmarks(in: source)
+    func takeBookmarks(from source: Chromium.Source, found: [Bookmark]? = nil) -> Int {
+        let found = found ?? Chromium.bookmarks(in: source)
         bookmarks.take(found, from: source.name)
         let count = Bookmarks.count(found)
         announce(count == 0 ? "No bookmarks in \(source.name)" : "\(count) bookmarks from \(source.name)")

@@ -475,6 +475,8 @@ struct BookmarksPanel: View {
 
     /// Found once as the panel opens, not on every draw of the tree.
     @State private var sources: [Chromium.Source] = []
+    /// Which browser's file is being read, while it is.
+    @State private var importing: String?
 
     var body: some View {
         Plate("Bookmarks", width: 600, close: { browser.bookmarking = false }) {
@@ -500,12 +502,31 @@ struct BookmarksPanel: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
                 ForEach(sources) { source in
-                    Pill(source.name) { browser.takeBookmarks(from: source) }
+                    Pill(source.name) {
+                        importing = source.name
+                        // Read off the main thread, as the passwords are, so
+                        // the pill can say it is busy rather than freeze.
+                        DispatchQueue.global(qos: .userInitiated).async {
+                            let found = Chromium.bookmarks(in: source)
+                            DispatchQueue.main.async {
+                                importing = nil
+                                browser.takeBookmarks(from: source, found: found)
+                            }
+                        }
+                    }
+                    .disabled(importing != nil)
                 }
                 Spacer()
-                Text(bookmarks.count == 1 ? "1 bookmark" : "\(bookmarks.count) bookmarks")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
+                if let importing {
+                    Ring(size: 10)
+                    Text("Reading \(importing)…")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.muted)
+                } else {
+                    Text(bookmarks.count == 1 ? "1 bookmark" : "\(bookmarks.count) bookmarks")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.muted)
+                }
             }
         }
         .onAppear { Chromium.installed { sources = $0 } }
