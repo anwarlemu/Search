@@ -28,6 +28,8 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     private var page: PopupPage?
     private var measuring: Timer?
     private(set) var extensionID: String?
+    /// Whose popup it is, for the line that says it couldn't open.
+    private var extensionName = ""
 
     /// The popup's web view, while one is up — for the bench.
     var view: WKWebView? { web }
@@ -62,6 +64,7 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         self.web = web
         self.popover = popover
         extensionID = context.uniqueIdentifier
+        extensionName = context.webExtension.displayName ?? "the extension"
         let page = PopupPage(web: web)
         self.page = page
         Extensions.shared.controller.didOpenTab(page)
@@ -274,6 +277,19 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     func webViewDidClose(_ webView: WKWebView) { close() }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { follow() }
+
+    /// A page that won't load — gone from the extension, refused by it —
+    /// was an empty popover for five seconds. Said, and closed (2 Oct 2026).
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { failed(webView, error) }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { failed(webView, error) }
+
+    private func failed(_ webView: WKWebView, _ error: Error) {
+        // A load the page itself cut short — window.close(), a link out —
+        // isn't a failure.
+        guard webView === web, (error as NSError).code != NSURLErrorCancelled else { return }
+        Extensions.shared.browser?.announce("Couldn't open \(extensionName)'s popup")
+        close()
+    }
 
     /// A link that asks for a new window becomes a tab, and the popup goes —
     /// the way it does in Chrome when you follow a link out of one.
