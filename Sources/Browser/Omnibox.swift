@@ -28,7 +28,11 @@ struct Omnibox: View {
                 field
                 if !browser.offers.isEmpty { list }
             }
-            .frame(width: Metrics.fieldWidth)
+            // As wide as it is meant to be, and narrower when the page
+            // beside a wide column leaves less: it used to hold its width
+            // and run off the window's edge (2 Oct 2026).
+            .frame(maxWidth: Metrics.fieldWidth)
+            .padding(.horizontal, 24)
             // Lifted a little above centre: dead centre reads as low, because
             // the strip at the top isn't part of what the eye is measuring.
             .padding(.bottom, 60)
@@ -39,6 +43,7 @@ struct Omnibox: View {
 
     private var field: some View {
         AddressField(browser: browser)
+            .frame(maxWidth: .infinity)
             .frame(height: 22)
             .padding(.horizontal, 22)
             .padding(.vertical, 14)
@@ -88,6 +93,7 @@ struct Omnibox: View {
             }
         }
         .padding(6)
+        .frame(maxWidth: .infinity)
         .background(Palette.ground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
