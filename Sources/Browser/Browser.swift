@@ -1742,7 +1742,7 @@ final class Browser: NSObject, ObservableObject {
         tab.$address
             .dropFirst()
             .sink { [weak self] _ in self?.rememberSession() }
-            .store(in: &bag)
+            .store(in: &tab.listeners)
 
         tab.$title
             .dropFirst()
@@ -1750,7 +1750,7 @@ final class Browser: NSObject, ObservableObject {
                 guard let tab, !tab.shy, let url = tab.address else { return }
                 self?.history.retitle(url, title)
             }
-            .store(in: &bag)
+            .store(in: &tab.listeners)
     }
 
     /// Put the cursor back in the field, from wherever asked.

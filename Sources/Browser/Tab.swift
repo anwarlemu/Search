@@ -1,3 +1,4 @@
+import Combine
 import ImageIO
 import SwiftUI
 import WebKit
@@ -331,6 +332,10 @@ final class Tab: ObservableObject, Identifiable {
     @Published private(set) var cover: NSImage?
 
     private var watch: [NSKeyValueObservation] = []
+    /// What the window listens to this tab for, kept here so it goes when
+    /// the tab does: kept by the window, a closed tab's listeners were
+    /// never let go of (2 Oct 2026).
+    var listeners = Set<AnyCancellable>()
 
     /// A tab that has never been anywhere shows the address field instead of a
     /// page. It still owns a web view — built now, warm by the time it's needed.
@@ -996,6 +1001,7 @@ final class Tab: ObservableObject, Identifiable {
     /// whatever the page left behind — timers, video, sockets.
     func close() {
         stuck?.cancel()
+        listeners = []
         onScroll = nil
         onZoom = nil
         onPick = nil
