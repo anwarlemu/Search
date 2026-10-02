@@ -843,6 +843,13 @@ struct ContentView: View {
         // Escape puts the page back. On a blank tab there is no page to put
         // back, so it belongs to whatever else wants it.
         if event.keyCode == 53 {
+            // The welcome covers everything, so it goes first — and goes
+            // for good, as Skip does (2 Oct 2026).
+            if browser.welcoming {
+                browser.prefs.welcomed = true
+                browser.welcoming = false
+                return true
+            }
             if browser.editingTab != nil {
                 browser.cancelTabEdit()
                 return true
@@ -913,6 +920,13 @@ struct ContentView: View {
 
         // Everything else is a key in the map, yours or the app's own.
         guard let chord = Chord(event: event) else { return false }
+        // With the welcome up there are no tabs to be had and no page to
+        // move about on: the app's keys wait, bar the one that puts the
+        // welcome away. Anything not ours — ⌘Q — still passes.
+        if browser.welcoming {
+            if browser.keys.command(for: chord) == .welcome { browser.welcoming = false }
+            return ours(chord)
+        }
         // ⌘Z while pointing: the last thing hidden comes back. Everywhere
         // else undo belongs to the page.
         if chord == Chord(key: "z", command: true), browser.veiling {
@@ -965,6 +979,16 @@ struct ContentView: View {
         if chord == Chord(key: "left", command: true) { browser.back(); return true }
         if chord == Chord(key: "right", command: true) { browser.forward(); return true }
         return false
+    }
+
+    /// A key the map below would answer: a command, a key of your own, one
+    /// of the nine, or the arrows that stand in for the brackets.
+    private func ours(_ chord: Chord) -> Bool {
+        if browser.keys.command(for: chord) != nil || browser.keys.custom(for: chord) != nil { return true }
+        if chord.command, chord.key == "left" || chord.key == "right" { return true }
+        guard chord.key.count == 1, let digit = Int(chord.key), (1...9).contains(digit) else { return false }
+        let one = chord.with(key: "1")
+        return one == browser.keys.chord(for: .tabNumber) || one == browser.keys.chord(for: .profileNumber)
     }
 
     /// True while the page on screen has the keyboard.
