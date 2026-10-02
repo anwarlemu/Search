@@ -1,3 +1,4 @@
+import Combine
 import ImageIO
 import SwiftUI
 import WebKit
@@ -128,7 +129,9 @@ final class Tab: ObservableObject, Identifiable {
     private weak var armedFor: PageView?
 
     @Published private(set) var title = ""
-    @Published private(set) var address: URL?
+    @Published private(set) var address: URL? {
+        didSet { restage() }
+    }
     @Published private(set) var progress: Double = 0
     @Published private(set) var loading = false
     @Published private(set) var canGoBack = false
@@ -185,7 +188,9 @@ final class Tab: ObservableObject, Identifiable {
     @Published var immersed = false
 
     /// True while this tab's page is out in the little window.
-    @Published var floating = false
+    @Published var floating = false {
+        didSet { restage() }
+    }
 
     /// A sideways swipe in progress, for the disc that shows it.
     @Published var pull: Pull?
@@ -304,7 +309,24 @@ final class Tab: ObservableObject, Identifiable {
     /// has a name and an address in the row, and costs nothing until you go to
     /// it — which is the difference between a browser that starts in half a
     /// second with twenty tabs and one that doesn't.
-    private(set) var pending: URL?
+    private(set) var pending: URL? {
+        didSet { restage() }
+    }
+
+    /// Whether the stage is to hold this tab's page, said again only when
+    /// that changes: not for a blank tab, not for one asleep, not while the
+    /// page is out in the little window. The stage used to watch the whole
+    /// tab, and every tick of progress, every scroll and every key typed
+    /// into the page re-ran it (2 Oct 2026). See Stage.swift.
+    final class Staging: ObservableObject {
+        @Published fileprivate(set) var wanted = false
+    }
+    let stage = Staging()
+
+    private func restage() {
+        let now = !isBlank && !asleep && !floating
+        if stage.wanted != now { stage.wanted = now }
+    }
 
     /// For a tab put to sleep for not being looked at: the page's own history
     /// — the back list, the page, where it was scrolled to — handed to the
@@ -317,6 +339,34 @@ final class Tab: ObservableObject, Identifiable {
     @Published private(set) var cover: NSImage?
 
     private var watch: [NSKeyValueObservation] = []
+    /// What the window listens to this tab for, kept here so it goes when
+    /// the tab does: kept by the window, a closed tab's listeners were
+    /// never let go of (2 Oct 2026).
+    var listeners = Set<AnyCancellable>()
+
+    /// What a page asked — alert, confirm, prompt — while nobody was
+    /// looking at its tab, held until somebody is. Shown at once, the
+    /// question stood over whatever tab was on screen, as if that page had
+    /// asked it (2 Oct 2026). Each comes with the way to answer it unasked,
+    /// for a page that goes before its tab is looked at again.
+    private var questions: [(show: () -> Void, dismiss: () -> Void)] = []
+
+    func ask(_ show: @escaping () -> Void, orDismiss dismiss: @escaping () -> Void) {
+        questions.append((show, dismiss))
+    }
+
+    /// The tab is on screen: whatever its page asked meanwhile, asked now.
+    func askNow() {
+        let held = questions
+        questions = []
+        held.forEach { $0.show() }
+    }
+
+    private func dismissQuestions() {
+        let held = questions
+        questions = []
+        held.forEach { $0.dismiss() }
+    }
 
     /// A tab that has never been anywhere shows the address field instead of a
     /// page. It still owns a web view — built now, warm by the time it's needed.
@@ -491,9 +541,6 @@ final class Tab: ObservableObject, Identifiable {
             WKUserScript(source: ScrollRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         )
         controller.addUserScript(
-            WKUserScript(source: Veiling.picker, injectionTime: .atDocumentStart, forMainFrameOnly: true)
-        )
-        controller.addUserScript(
             WKUserScript(source: FormRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         )
         controller.addUserScript(
@@ -541,8 +588,16 @@ final class Tab: ObservableObject, Identifiable {
         built?.evaluateJavaScript("window.__officeNotify && window.__officeNotify('\(state)')")
     }
 
-    func startPicking() { web.evaluateJavaScript("window.__officeVeil && window.__officeVeil.on()") }
-    func stopPicking() { web.evaluateJavaScript("window.__officeVeil && window.__officeVeil.off()") }
+    func startPicking() { veil("on()") }
+    func stopPicking() { veil("off()") }
+
+    /// The pointing mode, put into the page the first time it is asked for
+    /// and kept by the page from then on. It went into every page at
+    /// document start — six kilobytes of script for a thing most pages
+    /// never had pointed at them (2 Oct 2026).
+    private func veil(_ call: String) {
+        web.evaluateJavaScript(Veiling.picker + "\nwindow.__officeVeil.\(call)")
+    }
 
     func foundSignIn() { onSignIn?(self) }
 
@@ -660,13 +715,11 @@ final class Tab: ObservableObject, Identifiable {
 
     /// Show one hidden thing while the pointer rests on its row in the list.
     func peek(_ selector: String, keeping css: String) {
-        web.evaluateJavaScript(
-            "window.__officeVeil && window.__officeVeil.peek(`\(escape(css))`, `\(escape(selector))`)"
-        )
+        veil("peek(`\(escape(css))`, `\(escape(selector))`)")
     }
 
     func unpeek(_ css: String) {
-        web.evaluateJavaScript("window.__officeVeil && window.__officeVeil.unpeek(`\(escape(css))`)")
+        veil("unpeek(`\(escape(css))`)")
     }
 
     private func escape(_ text: String) -> String {
@@ -712,9 +765,11 @@ final class Tab: ObservableObject, Identifiable {
     /// Brought back from the last session: everything the row needs to draw it,
     /// and nothing fetched.
     func restore(url: URL, title: String) {
+        // Asleep before it has an address, so the stage is never told,
+        // even for a moment, that there is a page to want.
+        pending = url
         address = url
         self.title = title
-        pending = url
         adoptIcon()
     }
 
@@ -777,7 +832,14 @@ final class Tab: ObservableObject, Identifiable {
     /// on — can still be pictured. Nil when there is nothing to draw.
     func snapshot(_ done: @escaping (Data?) -> Void) {
         guard let built else { return done(nil) }
-        built.takeSnapshot(with: nil) { image, _ in
+        // At the page's size in points, not in pixels: a Retina picture of
+        // a big window was four times the memory, for something shown for
+        // a second or two under a page being rebuilt (2 Oct 2026). Drawn
+        // without scaling, point for pixel, it still lands where the page
+        // was — see the cover in Stage.swift.
+        let shape = WKSnapshotConfiguration()
+        shape.snapshotWidth = NSNumber(value: Double(built.bounds.width / 2))
+        built.takeSnapshot(with: shape) { image, _ in
             guard let image, let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
                 return done(nil)
             }
@@ -875,14 +937,26 @@ final class Tab: ObservableObject, Identifiable {
         // moment later and sit on its placeholder for good. Coming back to a
         // pinned tab after ⌘W is exactly that: select() asks for the view back
         // and wakes the page in the same breath, one synchronous step ahead of
-        // SwiftUI actually putting the view on screen. Bounded at about a
-        // second, so a wake with no stage waiting for it still loads rather
-        // than hanging on one that will never come.
-        let view = web
-        if view.window == nil, tries < 50 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
-                self?.loadAndVerify(url, state: state, tries: tries + 1)
+        // SwiftUI actually putting the view on screen. The view says when it
+        // has one — it was asked every twenty milliseconds instead (2 Oct
+        // 2026) — and a second's wait is the most it gets, so a wake with no
+        // stage waiting for it still loads rather than hanging on one that
+        // will never come.
+        // Only the first pass may build the view. The second — after the
+        // wait — finds the view that was there or gives up: a tab closed or
+        // put down in the meantime has none, and asking `web` built a fresh
+        // one, process and all, for nobody (2 Oct 2026).
+        guard let view = tries == 0 ? web : built, pending == nil else { return }
+        if view.window == nil, tries == 0 {
+            var waited = false
+            let go = { [weak self, weak view] in
+                guard !waited else { return }
+                waited = true
+                view?.onWindow = nil
+                self?.loadAndVerify(url, state: state, tries: 1)
             }
+            view.onWindow = go
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: go)
             return
         }
         // A tab that slept has its own history to go back to — the page, its
@@ -894,18 +968,20 @@ final class Tab: ObservableObject, Identifiable {
             view.visit(url)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self else { return }
-            guard built?.url?.absoluteString != "about:blank" else {
-                web.visit(url)
+            guard let self, let view = built, pending == nil else { return }
+            guard view.url?.absoluteString != "about:blank" else {
+                view.visit(url)
                 return
             }
-            web.evaluateJavaScript("document.readyState") { [weak self] _, error in
+            view.evaluateJavaScript("document.readyState") { [weak self] _, error in
                 MainActor.assumeIsolated {
-                    guard let self, let error = error as NSError? else { return }
+                    guard let self, let view = self.built, self.pending == nil,
+                          let error = error as NSError?
+                    else { return }
                     guard error.domain == WKErrorDomain,
                           error.code == WKError.webContentProcessTerminated.rawValue
                     else { return }
-                    self.web.visit(url)
+                    view.visit(url)
                 }
             }
         }
@@ -1013,6 +1089,7 @@ final class Tab: ObservableObject, Identifiable {
     /// whatever the page left behind — timers, video, sockets.
     func close() {
         stuck?.cancel()
+        listeners = []
         onScroll = nil
         onZoom = nil
         onPick = nil
@@ -1029,6 +1106,9 @@ final class Tab: ObservableObject, Identifiable {
     /// next time anyone asks for it.
     private func discard() {
         invalidateNavigation()
+        // The page is going; a question of its own that was never put is
+        // answered the way an unanswered one is, so nothing waits on it.
+        dismissQuestions()
         watch = []
         ears.stop()
         guard let web = built else { return }
@@ -1044,6 +1124,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.removeAllUserScripts()
         web.onPull = nil
         web.onTouch = nil
+        web.onWindow = nil
         web.stopLoading()
         web.navigationDelegate = nil
         web.uiDelegate = nil
@@ -1137,6 +1218,14 @@ final class PageView: WKWebView {
     /// Told the moment the page is reached for — a click, a scroll — so the
     /// picture of a tab waking up never stands between you and the page.
     var onTouch: (() -> Void)?
+    /// Told once the view is in a window, for a load that has to wait for
+    /// one. See Tab.loadAndVerify.
+    var onWindow: (() -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { onWindow?() }
+    }
 
     override func mouseDown(with event: NSEvent) {
         onTouch?()

@@ -29,35 +29,64 @@ extension Browser {
 
     /// Started once, at launch.
     func watchForSleep() {
-        let every = min(60, max(5, Browser.sleepAfter / 4))
-        let timer = Timer(timeInterval: every, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.sleepIdle() }
-        }
-        timer.tolerance = every / 4
-        RunLoop.main.add(timer, forMode: .common)
-        dozing = timer
+        armSleep()
 
         let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         source.setEventHandler { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, let event = self.pressure?.data else { return }
-                self.sleepIdle(within: event.contains(.critical) ? 0 : 5 * 60)
+                // Critical is every tab at once, and a picture of each —
+                // at the moment there is least room for pictures — is
+                // what it can least afford. They come back white instead.
+                let critical = event.contains(.critical)
+                self.sleepIdle(within: critical ? 0 : 5 * 60, pictured: !critical)
             }
         }
         source.resume()
         pressure = source
     }
 
+    /// One timer, set for the moment the tab left longest will have been
+    /// left long enough — not a look at every tab every minute, most of
+    /// which found nothing (2 Oct 2026). A tab past due but kept awake,
+    /// loading or playing, is looked at again in a minute; nothing to look
+    /// at means the next look is a whole wait away. Set again after every
+    /// look, whatever it found.
+    private func armSleep() {
+        dozing?.invalidate()
+        let wait = Browser.sleepAfter
+        let now = Date()
+        let due = (tabs + parkedTabs)
+            .filter { !$0.asleep && !$0.isBlank && $0.built != nil }
+            .map { $0.touched.addingTimeInterval(wait) }
+            .min() ?? now.addingTimeInterval(wait)
+        let soon = min(60, max(5, wait / 4))
+        let interval = due > now ? max(1, due.timeIntervalSince(now)) : soon
+        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.sleepIdle() }
+        }
+        timer.tolerance = interval / 4
+        RunLoop.main.add(timer, forMode: .common)
+        dozing = timer
+    }
+
     /// Every tab that has gone long enough without being looked at, the one
-    /// left longest first.
-    func sleepIdle(within given: TimeInterval? = nil) {
+    /// left longest first. The other profiles' too: a tab parked while it
+    /// was loading or playing stayed awake, and nothing came back for it
+    /// once it had finished (2 Oct 2026).
+    func sleepIdle(within given: TimeInterval? = nil, pictured: Bool = true) {
+        defer { armSleep() }
         guard prefs.sleepsTabs else { return }
         let wait = given ?? Browser.sleepAfter
         let now = Date()
         let idle = tabs
             .filter { now.timeIntervalSince($0.touched) >= wait && awake(because: $0) == nil }
             .sorted { $0.touched < $1.touched }
-        for tab in idle { self.sleep(tab) }
+        for tab in idle { self.sleep(tab, pictured: pictured) }
+        for tab in parkedTabs
+        where now.timeIntervalSince(tab.touched) >= wait && awake(because: tab, parking: true) == nil {
+            self.sleep(tab, parking: true, pictured: pictured)
+        }
     }
 
     /// Why a tab has to stay awake — nil when nothing keeps it. The clock is
@@ -86,8 +115,9 @@ extension Browser {
 
     /// Asks the page whether it holds anything typed, pictures it, then lets
     /// it go — looking again at each step, since each takes a moment and you
-    /// may have gone back to the tab in the meantime.
-    func sleep(_ tab: Tab, parking: Bool = false, done: ((String) -> Void)? = nil) {
+    /// may have gone back to the tab in the meantime. `pictured` false
+    /// skips the picture.
+    func sleep(_ tab: Tab, parking: Bool = false, pictured: Bool = true, done: ((String) -> Void)? = nil) {
         if let reason = awake(because: tab, parking: parking) {
             done?(reason)
             return
@@ -109,14 +139,19 @@ extension Browser {
                 done?("holding something typed")
                 return
             }
-            if let reason = self.awake(because: tab, parking: parking) {
+            if let reason = self.awake(because: tab, parking: self.parked(tab, parking)) {
                 done?(reason)
+                return
+            }
+            guard pictured else {
+                tab.sleep(picture: nil)
+                done?("asleep")
                 return
             }
             tab.snapshot { [weak self, weak tab] picture in
                 guard let self, let tab else { return }
                 guard current() else { done?("page changed"); return }
-                if let reason = self.awake(because: tab, parking: parking) {
+                if let reason = self.awake(because: tab, parking: self.parked(tab, parking)) {
                     done?(reason)
                     return
                 }
@@ -124,5 +159,13 @@ extension Browser {
                 done?("asleep")
             }
         }
+    }
+
+    /// Whether a tab being parked still is, a moment later. Each step above
+    /// takes a beat, and a profile switched away from and straight back
+    /// put the tab on screen again with "parked" still said of it — so the
+    /// tab you were looking at went to sleep under you (2 Oct 2026).
+    private func parked(_ tab: Tab, _ parking: Bool) -> Bool {
+        parking && !tabs.contains { $0.id == tab.id }
     }
 }

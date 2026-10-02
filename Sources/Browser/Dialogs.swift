@@ -20,7 +20,25 @@ extension Browser {
     ) {
         let alert = Dialogs.alert(from: frame, saying: message)
         alert.addButton(withTitle: "OK")
-        Dialogs.show(alert, over: webView) { _ in completionHandler() }
+        ask(alert, over: webView, orDismiss: completionHandler) { _ in completionHandler() }
+    }
+
+    /// The question now, over the page that asked it — or, for a page in a
+    /// tab nobody is looking at, held until they are, since a sheet over
+    /// the tab on screen reads as that page's. `dismiss` is the answer the
+    /// page gets if its tab goes first: OK, no, nothing.
+    private func ask(
+        _ alert: NSAlert,
+        over webView: WKWebView,
+        orDismiss dismiss: @escaping () -> Void,
+        then finish: @escaping (NSApplication.ModalResponse) -> Void
+    ) {
+        let owner = tab(for: webView) ?? parkedTabs.first { $0.built === webView }
+        guard let owner, owner.id != activeID else {
+            Dialogs.show(alert, over: webView, then: finish)
+            return
+        }
+        owner.ask({ Dialogs.show(alert, over: webView, then: finish) }, orDismiss: dismiss)
     }
 
     func webView(
@@ -32,7 +50,7 @@ extension Browser {
         let alert = Dialogs.alert(from: frame, saying: message)
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
-        Dialogs.show(alert, over: webView) { answer in
+        ask(alert, over: webView, orDismiss: { completionHandler(false) }) { answer in
             completionHandler(answer == .alertFirstButtonReturn)
         }
     }
@@ -51,7 +69,7 @@ extension Browser {
         field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
-        Dialogs.show(alert, over: webView) { answer in
+        ask(alert, over: webView, orDismiss: { completionHandler(nil) }) { answer in
             completionHandler(answer == .alertFirstButtonReturn ? field.stringValue : nil)
         }
     }

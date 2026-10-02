@@ -120,7 +120,7 @@ final class Browser: NSObject, ObservableObject {
         if park.active == nil { park.active = going.first?.id }
         parked[index] = park
         for tab in going { sleep(tab, parking: true) }
-        writeSession(now: true)
+        writeSession()
         announce(going.count == 1 ? "One tab to \(profileNames[index])" : "\(going.count) tabs to \(profileNames[index])")
     }
 
@@ -137,6 +137,10 @@ final class Browser: NSObject, ObservableObject {
         }
         return nil
     }
+
+    /// Every tab in the other profiles, for the look for tabs to put to
+    /// sleep (Sleep.swift).
+    var parkedTabs: [Tab] { parked.values.flatMap(\.tabs) }
 
     /// A tab by id, in whichever profile it is.
     func tab(_ id: Tab.ID) -> Tab? {
@@ -184,7 +188,7 @@ final class Browser: NSObject, ObservableObject {
             if !tab.wake() { tab.revive() }
         }
         for tab in leaving { sleep(tab, parking: true) }
-        writeSession(now: true)
+        writeSession()
         announce(profileNames[index])
     }
 
@@ -207,7 +211,7 @@ final class Browser: NSObject, ObservableObject {
     func renameProfile(_ index: Int, to name: String) {
         guard profileNames.indices.contains(index) else { return }
         profileNames[index] = name
-        writeSession(now: true)
+        writeSession()
     }
 
     /// Its tabs close with it. Never the last one: a browser always has a
@@ -220,7 +224,7 @@ final class Browser: NSObject, ObservableObject {
         parked = Dictionary(uniqueKeysWithValues: parked.map { ($0.key > index ? $0.key - 1 : $0.key, $0.value) })
         profileNames.remove(at: index)
         if profile > index { profile -= 1 }
-        writeSession(now: true)
+        writeSession()
     }
 
     /// Everything there is to set. Held here so the whole window redraws when
@@ -256,22 +260,31 @@ final class Browser: NSObject, ObservableObject {
 
     /// Another browser's bookmarks, folders and all — and, behind them, the
     /// icons it had for those sites, so the menu wears them from the start
-    /// instead of a letter each. Returns how many pages came over.
-    @discardableResult
-    func takeBookmarks(from source: Chromium.Source, found: [Bookmark]? = nil) -> Int {
-        let found = found ?? Chromium.bookmarks(in: source)
-        bookmarks.take(found, from: source.name)
-        let count = Bookmarks.count(found)
-        announce(count == 0 ? "No bookmarks in \(source.name)" : "\(count) bookmarks from \(source.name)")
-        let urls = Bookmarks.urls(found)
-        DispatchQueue.global(qos: .utility).async {
-            let icons = Chromium.icons(in: source, for: urls)
-            Task { @MainActor in
-                for (host, data) in icons { await Favicons.shared.adopt(data, for: host) }
-                self.objectWillChange.send()
+    /// instead of a letter each. The file is read and parsed off the main
+    /// thread unless the caller already has it — a few thousand bookmarks
+    /// held the window while it was (2 Oct 2026) — and `done` hears how
+    /// many pages came over.
+    func takeBookmarks(from source: Chromium.Source, found: [Bookmark]? = nil, then done: ((Int) -> Void)? = nil) {
+        let apply: ([Bookmark]) -> Void = { [weak self] found in
+            guard let self else { return }
+            bookmarks.take(found, from: source.name)
+            let count = Bookmarks.count(found)
+            announce(count == 0 ? "No bookmarks in \(source.name)" : "\(count) bookmarks from \(source.name)")
+            done?(count)
+            let urls = Bookmarks.urls(found)
+            DispatchQueue.global(qos: .utility).async {
+                let icons = Chromium.icons(in: source, for: urls)
+                Task { @MainActor in
+                    for (host, data) in icons { await Favicons.shared.adopt(data, for: host) }
+                    self.objectWillChange.send()
+                }
             }
         }
-        return count
+        if let found { return apply(found) }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let found = Chromium.bookmarks(in: source)
+            DispatchQueue.main.async { apply(found) }
+        }
     }
 
     /// ⇧⌘S. The same tabs, down the left or across the top.
@@ -564,10 +577,23 @@ final class Browser: NSObject, ObservableObject {
         Vault.off({ Vault.forget(host: login.host, user: login.user) }) { [weak self] in self?.relist() }
     }
 
+    /// Behind the same proof as showing one: a password on the clipboard
+    /// is a password shown to whatever reads the clipboard. And off it
+    /// again a minute later, unless something else has been copied since
+    /// (2 Oct 2026).
     func copy(_ login: Login) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(login.password, forType: .string)
-        announce("Password copied")
+        Vault.prove("copy the password for \(login.host)") { [weak self] ok in
+            guard ok else { return }
+            let board = NSPasteboard.general
+            board.clearContents()
+            board.setString(login.password, forType: .string)
+            let put = board.changeCount
+            DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+                guard board.changeCount == put else { return }
+                board.clearContents()
+            }
+            self?.announce("Password copied")
+        }
     }
 
     /// What came back from another browser's store, put in the keychain.
@@ -594,7 +620,9 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// The other browser's history, into this one's. Off the main thread for
-    /// the reading; the merge itself is a moment.
+    /// the reading; the merge, which has to be where the history lives, a
+    /// few hundred places at a time between frames rather than all of
+    /// them in one go (2 Oct 2026).
     func takePlaces(from source: Chromium.Source, then done: @escaping (Int) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             let places = Chromium.places(in: source)
@@ -670,11 +698,6 @@ final class Browser: NSObject, ObservableObject {
         announce("History cleared")
     }
 
-    /// The last few places, for the History menu.
-    var recentlyVisited: [History.Trace] {
-        history.recent(8)
-    }
-
     // MARK: - the camera and the microphone
 
     /// A page asking to see or hear you, waiting for an answer. WebKit hands
@@ -743,7 +766,7 @@ final class Browser: NSObject, ObservableObject {
         // No dialog and no waiting cursor: the letter is taken from the
         // address and applied. Changing it is a separate act, for the day it
         // matters — which is why it is not folded into this one.
-        writeSession(now: true)
+        writeSession()
     }
 
     /// ⇧⌘D. The tab on screen pinned, or a pinned one let back into the row.
@@ -776,13 +799,12 @@ final class Browser: NSObject, ObservableObject {
     func endPinEdit() {
         guard editingPin != nil else { return }
         editingPin = nil
-        writeSession(now: true)
+        writeSession()
     }
 
     func unpin(_ tab: Tab) {
         if editingPin == tab.id { editingPin = nil }
         tab.pin = nil
-        defer { writeSession(now: true) }
         // Back out of the pinned block, to the head of the loose tabs.
         if let here = tabs.firstIndex(where: { $0.id == tab.id }) {
             let home = pinnedCount
@@ -790,7 +812,7 @@ final class Browser: NSObject, ObservableObject {
                 tabs.move(fromOffsets: IndexSet(integer: here), toOffset: home > here ? home + 1 : home)
             }
         }
-        rememberSession()
+        writeSession()
     }
 
     // MARK: - the address, in the tab itself
@@ -863,8 +885,8 @@ final class Browser: NSObject, ObservableObject {
     }
 
     private var bag = Set<AnyCancellable>()
-    /// The minute-by-minute look for tabs to put to sleep, and the ear for
-    /// macOS saying memory is short. See Sleep.swift.
+    /// The next look for tabs to put to sleep, and the ear for macOS saying
+    /// memory is short. See Sleep.swift.
     var dozing: Timer?
     var pressure: DispatchSourceMemoryPressure?
     /// Downloads still under way. See `keep(_:)`.
@@ -925,11 +947,9 @@ final class Browser: NSObject, ObservableObject {
         Updater.shared.checkIfDue { [weak self] line in self?.announce(line) }
         FormRelay.passkeysOffered = prefs.passkeys
 
-        // The History menu lists what the history holds, and the menu is drawn
-        // from this object's changes — so the history's are passed on.
-        history.objectWillChange
-            .sink { [weak self] in self?.objectWillChange.send() }
-            .store(in: &bag)
+        // The history's own changes are not passed on: every page that
+        // loaded had the whole window redrawn for a menu nobody had open.
+        // The History menu's list watches the history itself (2 Oct 2026).
         bookmarks.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
             .store(in: &bag)
@@ -1106,7 +1126,6 @@ final class Browser: NSObject, ObservableObject {
     private func beginPrivate() {
         profileNames = ["Private"]
         welcoming = false
-        history.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         bookmarks.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         prefs.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         keys.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
@@ -1179,9 +1198,16 @@ final class Browser: NSObject, ObservableObject {
             .store(in: &bag)
 
         // The window and the menus are drawn from this object; a setting that
-        // changes what they show has to be heard here.
+        // changes what they show has to be heard here. Not the column's
+        // width while its edge is pulled: the column watches that itself,
+        // and the whole window was redrawn for every pixel of the pull
+        // (2 Oct 2026). Only the field, centred over the page beside the
+        // column, is laid out from here and has to follow.
         prefs.objectWillChange
-            .sink { [weak self] in self?.objectWillChange.send() }
+            .sink { [weak self] in
+                guard let self, !prefs.widening || fieldShowing else { return }
+                objectWillChange.send()
+            }
             .store(in: &bag)
         keys.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
@@ -1211,6 +1237,9 @@ final class Browser: NSObject, ObservableObject {
         Favicons.shared.relook(tabs.filter { !$0.asleep })
     }
 
+    /// The session as it stands, gathered here and written by Session's own
+    /// queue — not here on the main thread, which every pin, move and
+    /// profile switch used to wait on (2 Oct 2026). `now` waits for it.
     private func writeSession(now: Bool = false) {
         // A private window is in no session: nothing of it comes back.
         guard !isPrivate else { return }
@@ -1245,7 +1274,7 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// The app is quitting. Whatever the debounce above was waiting out, it
-    /// stops waiting: this writes straight to disk, on the thread asking to
+    /// stops waiting: this waits for the disk, on the thread asking to
     /// quit, before there is a process left to finish the wait on its behalf.
     func flushSession() {
         writeSession(now: true)
@@ -1315,6 +1344,12 @@ final class Browser: NSObject, ObservableObject {
         rememberSession()
         editing = false
         typed = ""
+        // Whatever its page asked while you were elsewhere — a turn later,
+        // once the stage has the view, so the sheet hangs off its window.
+        DispatchQueue.main.async { [weak self, weak tab] in
+            guard let self, let tab, tab.id == activeID else { return }
+            tab.askNow()
+        }
     }
 
     /// ⌘W, or the cross on the tab. Closing the last one leaves a blank tab
@@ -1333,6 +1368,13 @@ final class Browser: NSObject, ObservableObject {
         // looking at before. Only Unpin takes it out of the row.
         if tab.pin != nil {
             tab.rest()
+            // A pin put down from its cross while you were elsewhere leaves
+            // you where you were: landing somewhere else as well took you
+            // off the page you were reading (2 Oct 2026).
+            guard tab.id == activeID else {
+                writeSession()
+                return
+            }
             // Ordinary tabs first. Falling back to the most recent tab of any
             // kind meant closing one pin landed you on another pin, and ⌘W
             // bounced between the two instead of getting you out of them.
@@ -1345,7 +1387,8 @@ final class Browser: NSObject, ObservableObject {
             } else {
                 newTab()
             }
-            writeSession(now: true)
+            // Landing somewhere already has the session written; the pin
+            // itself is in it as before, address and letter.
             return
         }
 
@@ -1539,6 +1582,20 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
+    /// An address typed, pasted or picked: into the tab on screen — or a
+    /// new one beside it while that tab's video is out in the little
+    /// window, the way a bookmark or a link from another app already
+    /// goes. Typed over a floating tab, the address took the page out from
+    /// under the video (2 Oct 2026).
+    private func go(to url: URL) {
+        guard let tab = active ?? tabs.first else { return }
+        if tab.floating {
+            open(url, foreground: true)
+        } else {
+            tab.go(to: url)
+        }
+    }
+
     /// ⌘⇧N. A tab that keeps nothing — its own cookies, its own sign-ins, no
     /// history, and no place in tomorrow's session.
     func newShyTab() {
@@ -1569,7 +1626,7 @@ final class Browser: NSObject, ObservableObject {
             refusals += 1
             return
         }
-        (active ?? tabs.first)?.go(to: url)
+        go(to: url)
         editing = false
         typed = ""
     }
@@ -1632,9 +1689,19 @@ final class Browser: NSObject, ObservableObject {
                     if !quietly { self.announce("Nothing is playing here") }
                     return
                 }
+                // The page answered a moment late. Back on this tab by then,
+                // or the little window taken by another, or the page gone:
+                // the video is put back where it was rather than lifted out
+                // from under you, which left the stage blank (2 Oct 2026).
+                guard let web = tab.built, !tab.asleep, !self.floater.showing, self.floating == nil,
+                      !(quietly && tab.id == self.activeID)
+                else {
+                    tab.built?.evaluateJavaScript(Isolate.off(pausing: false))
+                    return
+                }
                 self.floating = tab.id
                 tab.floating = true
-                self.floater.lift(tab.web)
+                self.floater.lift(web)
             }
         }
     }
@@ -1751,7 +1818,7 @@ final class Browser: NSObject, ObservableObject {
         tab.$address
             .dropFirst()
             .sink { [weak self] _ in self?.rememberSession() }
-            .store(in: &bag)
+            .store(in: &tab.listeners)
 
         tab.$title
             .dropFirst()
@@ -1759,7 +1826,7 @@ final class Browser: NSObject, ObservableObject {
                 guard let tab, !tab.shy, let url = tab.address else { return }
                 self?.history.retitle(url, title)
             }
-            .store(in: &bag)
+            .store(in: &tab.listeners)
     }
 
     /// Put the cursor back in the field, from wherever asked.
@@ -1961,7 +2028,7 @@ final class Browser: NSObject, ObservableObject {
             refusals += 1
             return
         }
-        (active ?? tabs.first)?.go(to: url)
+        go(to: url)
         editing = false
         typed = ""
     }
@@ -2068,8 +2135,42 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         if ["http", "https", "file", "about", "data", "blob", "chrome-extension", "webkit-extension"].contains(scheme) {
             decisionHandler(.allow)
         } else {
-            NSWorkspace.shared.open(url)
             decisionHandler(.cancel)
+            openElsewhere(url, scheme: scheme, from: webView)
+        }
+    }
+
+    /// A link into another app — zoom:, slack:, an app's own scheme. Asked
+    /// about first, once per site and scheme: any page could open any app
+    /// on this Mac without a word, and did (2 Oct 2026). Mail is the one
+    /// everybody means, and goes straight through. "Always" is kept, except
+    /// in a private window, which keeps nothing.
+    private func openElsewhere(_ url: URL, scheme: String, from webView: WKWebView) {
+        let site = tab(for: webView)?.address?.host()?.lowercased() ?? ""
+        let key = "open.\(scheme)|\(site)"
+        if scheme == "mailto" || Store.settings.bool(forKey: key) {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        guard let app = NSWorkspace.shared.urlForApplication(toOpen: url) else {
+            announce("Nothing on this Mac opens \(scheme) links")
+            return
+        }
+        let name = app.deletingPathExtension().lastPathComponent
+        let alert = NSAlert()
+        alert.messageText = "Open in \(name)?"
+        alert.informativeText = "\(site.isEmpty ? "This page" : site) wants to open a \(scheme) link in \(name)."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = site.isEmpty ? "Always open \(scheme) links" : "Always for \(site)"
+        Dialogs.show(alert, over: webView) { [weak self] answer in
+            guard answer == .alertFirstButtonReturn else { return }
+            if alert.suppressionButton?.state == .on, self?.isPrivate == false {
+                Store.settings.set(true, forKey: key)
+            }
+            NSWorkspace.shared.open(url)
         }
     }
 

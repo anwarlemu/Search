@@ -48,10 +48,28 @@ final class Preferences: ObservableObject {
     @Published var bare: Bool {
         didSet { store.set(bare, forKey: "bare") }
     }
-    /// How wide the column is. Pulled by its edge, and remembered.
+    /// How wide the column is. Pulled by its edge, and remembered — once
+    /// the hand has rested a moment, not at every pixel it passes through
+    /// (2 Oct 2026).
     @Published var sideWidth: CGFloat {
-        didSet { store.set(Double(sideWidth), forKey: "sidebar.width") }
+        willSet { widening = true }
+        didSet {
+            widening = false
+            keepWidth?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                store.set(Double(sideWidth), forKey: "sidebar.width")
+            }
+            keepWidth = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        }
     }
+    private var keepWidth: DispatchWorkItem?
+    /// True for the instant a change of width is being announced, so the
+    /// window can tell one from any other setting — the column draws
+    /// itself for those, and the rest of the window needn't (see
+    /// Browser.follow).
+    private(set) var widening = false
     @Published var glyph: Glyph {
         didSet { store.set(glyph.rawValue, forKey: "glyph") }
     }
@@ -128,10 +146,15 @@ final class Preferences: ObservableObject {
     init() {
         // Carried over from when there were four ways of holding the browser
         // and this was one of them.
-        // Light unless asked otherwise — the browser was only ever light
-        // before this was a choice.
         bench = store.bool(forKey: "bench")
-        let chosen = store.string(forKey: "look").flatMap(Look.init) ?? .light
+        // The Mac's own look for a fresh install (2 Oct 2026). Anyone here
+        // from before this was a choice stays light, which is all the
+        // browser ever was for them — and whichever it is, it is written
+        // down now, so walking through the welcome can't turn it over on
+        // the next launch.
+        let before = store.bool(forKey: "welcomed") || store.object(forKey: "glyph") != nil
+        let chosen = store.string(forKey: "look").flatMap(Look.init) ?? (before ? .light : .system)
+        store.set(chosen.rawValue, forKey: "look")
         look = chosen
         // Before the first window, and not deferred: the window that is about
         // to be made should be made in the right appearance.

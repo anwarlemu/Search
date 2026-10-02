@@ -120,15 +120,27 @@ final class Links: NSObject, NSApplicationDelegate {
 
     /// Runs once a window is actually showing, and one turn of the run loop
     /// after that, so the frame is on the screen before the work starts.
-    /// Gives up waiting after a second or so and runs anyway.
+    /// The window says so when it comes to the front — it was asked every
+    /// thirty milliseconds instead (2 Oct 2026). Gives up waiting after a
+    /// second or so and runs anyway.
     @MainActor
-    private static func onceShown(_ then: @escaping () -> Void, tries: Int = 0) {
-        let shown = NSApp.windows.contains { $0.isVisible && $0.contentView != nil }
-        if shown || tries > 40 {
+    private static func onceShown(_ then: @escaping () -> Void) {
+        if NSApp.windows.contains(where: { $0.isVisible && $0.contentView != nil }) {
             DispatchQueue.main.async(execute: then)
-        } else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { onceShown(then, tries: tries + 1) }
+            return
         }
+        var token: NSObjectProtocol?
+        var ran = false
+        let once = {
+            guard !ran else { return }
+            ran = true
+            if let token { NotificationCenter.default.removeObserver(token) }
+            DispatchQueue.main.async(execute: then)
+        }
+        token = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
+        ) { _ in once() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: once)
     }
 
     private static func take(_ url: URL) {

@@ -49,22 +49,38 @@ enum Session {
         return Shape(profiles: [], current: 0)
     }
 
-    /// `now` writes on the calling thread. Quitting doesn't wait for a
-    /// background queue, and a session handed to one on the way out is a
-    /// session that may never reach the disk.
+    /// Every write goes through one queue, in order, and only the newest
+    /// shape handed over is ever written: writes used to go two ways —
+    /// straight to disk from the main thread, or to a global queue —
+    /// and a debounced one from before could land after, and over, the
+    /// state that followed it (2 Oct 2026).
+    private static let queue = DispatchQueue(label: "session", qos: .utility)
+    private static let lock = NSLock()
+    private static var waiting: Shape?
+
+    /// `now` waits for the write. Quitting doesn't wait for a background
+    /// queue, and a session handed to one on the way out is a session that
+    /// may never reach the disk.
     static func write(now: Bool = false, _ shape: Shape) {
+        lock.lock()
+        let queued = waiting != nil
+        waiting = shape
+        lock.unlock()
+        // One drain is already on its way and will find this shape there.
+        if !queued { queue.async(execute: drain) }
+        if now { queue.sync {} }
+    }
+
+    private static func drain() {
+        lock.lock()
+        let shape = waiting
+        waiting = nil
+        lock.unlock()
+        guard let shape, let data = try? JSONEncoder().encode(shape) else { return }
         let file = Session.file
-        let put = {
-            guard let data = try? JSONEncoder().encode(shape) else { return }
-            try? FileManager.default.createDirectory(
-                at: file.deletingLastPathComponent(), withIntermediateDirectories: true
-            )
-            try? data.write(to: file, options: .atomic)
-        }
-        if now {
-            put()
-        } else {
-            DispatchQueue.global(qos: .utility).async(execute: put)
-        }
+        try? FileManager.default.createDirectory(
+            at: file.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try? data.write(to: file, options: .atomic)
     }
 }
