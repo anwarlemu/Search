@@ -119,7 +119,9 @@ final class Browser: NSObject, ObservableObject {
         park.tabs.append(contentsOf: going)
         if park.active == nil { park.active = going.first?.id }
         parked[index] = park
-        for tab in going { sleep(tab, parking: true) }
+        // Parked with their pages, unless tabs are set to sleep: put to
+        // sleep on the way out, every one came back stale (2 Oct 2026).
+        if prefs.sleepsTabs { for tab in going { sleep(tab, parking: true) } }
         writeSession()
         announce(going.count == 1 ? "One tab to \(profileNames[index])" : "\(going.count) tabs to \(profileNames[index])")
     }
@@ -187,7 +189,10 @@ final class Browser: NSObject, ObservableObject {
             tab.touch()
             if !tab.wake() { tab.revive() }
         }
-        for tab in leaving { sleep(tab, parking: true) }
+        // The profile you left keeps its pages, unless tabs are set to
+        // sleep — switching back and finding every page rebuilt was the
+        // complaint (2 Oct 2026).
+        if prefs.sleepsTabs { for tab in leaving { sleep(tab, parking: true) } }
         writeSession()
         announce(profileNames[index])
     }

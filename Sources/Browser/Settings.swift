@@ -334,7 +334,7 @@ struct SettingsPanel: View {
                 Segmented(options: Glyph.allCases.map { ($0, $0.title) }, selection: $prefs.glyph)
             }
             Rule()
-            Line("Sleep tabs you aren't using", "After half an hour away they come back where you left them. Pinned tabs, sound, calls and anything typed stay awake.") {
+            Line("Sleep tabs you aren't using", "After half an hour away, and when you switch profiles, they give up their page and come back where you left them. Off, every tab keeps its page. Pinned tabs, sound, calls and anything typed stay awake either way.") {
                 Switch(on: $prefs.sleepsTabs)
             }
         }
