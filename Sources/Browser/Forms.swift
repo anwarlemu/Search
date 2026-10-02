@@ -203,7 +203,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       // The boxes going away without a new page — a sign-in done in place —
       // is the other way a sign-in shows it took.
       var settling = null;
-      new MutationObserver(function () {
+      function changed() {
         if (!told) { tell(); return; }
         if (pair()) return;
         told = false;
@@ -212,6 +212,28 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           if (pair()) return;
           window.webkit.messageHandlers.officeForms.postMessage({ kind: 'settled' });
         }, 400);
+      }
+      // Only a change that put a box on the page or took one off, and at
+      // most once every 150 ms: pair() measures every password box, and a
+      // page that redraws as you type ran it on every mutation (2 Oct 2026).
+      function holdsInput(nodes) {
+        for (var k = 0; k < nodes.length; k++) {
+          var node = nodes[k];
+          if (node.nodeType !== 1) continue;
+          var tag = node.tagName;
+          if (tag === 'INPUT' || tag === 'FORM' || (node.querySelector && node.querySelector('input'))) return true;
+        }
+        return false;
+      }
+      var looking = null;
+      new MutationObserver(function (list) {
+        if (looking) return;
+        for (var m = 0; m < list.length; m++) {
+          if (holdsInput(list[m].addedNodes) || holdsInput(list[m].removedNodes)) {
+            looking = setTimeout(function () { looking = null; changed(); }, 150);
+            return;
+          }
+        }
       }).observe(document.documentElement, { childList: true, subtree: true });
 
       // Whether the caret is somewhere on the page that takes typing.
