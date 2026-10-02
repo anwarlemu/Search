@@ -529,6 +529,13 @@ struct ContentView: View {
             // the main window, never a private one.
             if !browser.isPrivate { Links.hand(to: browser) }
         }
+        // The monitor holds this view, and the view its browser: a closed
+        // private window kept its whole browser alive until the monitor was
+        // taken down with it (2 Oct 2026).
+        .onDisappear {
+            if let keys { NSEvent.removeMonitor(keys) }
+            keys = nil
+        }
     }
 
     /// Give the keyboard back to the page once the field is done with it.
