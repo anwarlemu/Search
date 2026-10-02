@@ -53,7 +53,9 @@ extension Browser {
     }
 
     /// Every tab that has gone long enough without being looked at, the one
-    /// left longest first.
+    /// left longest first. The other profiles' too: a tab parked while it
+    /// was loading or playing stayed awake, and nothing came back for it
+    /// once it had finished (2 Oct 2026).
     func sleepIdle(within given: TimeInterval? = nil, pictured: Bool = true) {
         guard prefs.sleepsTabs else { return }
         let wait = given ?? Browser.sleepAfter
@@ -62,6 +64,10 @@ extension Browser {
             .filter { now.timeIntervalSince($0.touched) >= wait && awake(because: $0) == nil }
             .sorted { $0.touched < $1.touched }
         for tab in idle { self.sleep(tab, pictured: pictured) }
+        for tab in parkedTabs
+        where now.timeIntervalSince(tab.touched) >= wait && awake(because: tab, parking: true) == nil {
+            self.sleep(tab, parking: true, pictured: pictured)
+        }
     }
 
     /// Why a tab has to stay awake — nil when nothing keeps it. The clock is

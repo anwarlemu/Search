@@ -137,6 +137,10 @@ final class Browser: NSObject, ObservableObject {
         return nil
     }
 
+    /// Every tab in the other profiles, for the look for tabs to put to
+    /// sleep (Sleep.swift).
+    var parkedTabs: [Tab] { parked.values.flatMap(\.tabs) }
+
     /// A tab by id, in whichever profile it is.
     func tab(_ id: Tab.ID) -> Tab? {
         tabs.first { $0.id == id } ?? parked.values.lazy.compactMap { $0.tabs.first { $0.id == id } }.first
