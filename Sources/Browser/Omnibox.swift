@@ -29,13 +29,17 @@ struct Omnibox: View {
                     if !browser.offers.isEmpty {
                         ScrollViewReader { reader in
                             ScrollView {
-                                list.background(GeometryReader { size in
-                                    Color.clear.preference(key: OfferHeight.self, value: size.size.height)
-                                })
+                                // The list is as tall as its rows, up to what
+                                // the window has room for; past that it
+                                // scrolls. Measured here, on the rows: a
+                                // preference set under the scroll view never
+                                // reached it, and the list stayed at nothing.
+                                list.onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+                                    listHeight = $0
+                                }
                             }
                             .frame(height: min(listHeight, max(60, geometry.size.height - 130)))
                             .clipShape(RoundedRectangle(cornerRadius: 14))
-                            .onPreferenceChange(OfferHeight.self) { listHeight = $0 }
                             .onChange(of: browser.picked) { _, picked in
                                 if let picked, browser.offers.indices.contains(picked) {
                                     reader.scrollTo(browser.offers[picked].id)
@@ -51,11 +55,6 @@ struct Omnibox: View {
                 .animation(Motion.settle, value: refused)
             }
         }
-    }
-
-    private struct OfferHeight: PreferenceKey {
-        static let defaultValue: CGFloat = 0
-        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
     }
 
     private var field: some View {
