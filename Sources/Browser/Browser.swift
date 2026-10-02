@@ -119,7 +119,7 @@ final class Browser: NSObject, ObservableObject {
         if park.active == nil { park.active = going.first?.id }
         parked[index] = park
         for tab in going { sleep(tab, parking: true) }
-        writeSession(now: true)
+        writeSession()
         announce(going.count == 1 ? "One tab to \(profileNames[index])" : "\(going.count) tabs to \(profileNames[index])")
     }
 
@@ -182,7 +182,7 @@ final class Browser: NSObject, ObservableObject {
             if !tab.wake() { tab.revive() }
         }
         for tab in leaving { sleep(tab, parking: true) }
-        writeSession(now: true)
+        writeSession()
         announce(profileNames[index])
     }
 
@@ -205,7 +205,7 @@ final class Browser: NSObject, ObservableObject {
     func renameProfile(_ index: Int, to name: String) {
         guard profileNames.indices.contains(index) else { return }
         profileNames[index] = name
-        writeSession(now: true)
+        writeSession()
     }
 
     /// Its tabs close with it. Never the last one: a browser always has a
@@ -218,7 +218,7 @@ final class Browser: NSObject, ObservableObject {
         parked = Dictionary(uniqueKeysWithValues: parked.map { ($0.key > index ? $0.key - 1 : $0.key, $0.value) })
         profileNames.remove(at: index)
         if profile > index { profile -= 1 }
-        writeSession(now: true)
+        writeSession()
     }
 
     /// Everything there is to set. Held here so the whole window redraws when
@@ -745,7 +745,7 @@ final class Browser: NSObject, ObservableObject {
         // No dialog and no waiting cursor: the letter is taken from the
         // address and applied. Changing it is a separate act, for the day it
         // matters — which is why it is not folded into this one.
-        writeSession(now: true)
+        writeSession()
     }
 
     /// ⇧⌘D. The tab on screen pinned, or a pinned one let back into the row.
@@ -778,13 +778,12 @@ final class Browser: NSObject, ObservableObject {
     func endPinEdit() {
         guard editingPin != nil else { return }
         editingPin = nil
-        writeSession(now: true)
+        writeSession()
     }
 
     func unpin(_ tab: Tab) {
         if editingPin == tab.id { editingPin = nil }
         tab.pin = nil
-        defer { writeSession(now: true) }
         // Back out of the pinned block, to the head of the loose tabs.
         if let here = tabs.firstIndex(where: { $0.id == tab.id }) {
             let home = pinnedCount
@@ -792,7 +791,7 @@ final class Browser: NSObject, ObservableObject {
                 tabs.move(fromOffsets: IndexSet(integer: here), toOffset: home > here ? home + 1 : home)
             }
         }
-        rememberSession()
+        writeSession()
     }
 
     // MARK: - the address, in the tab itself
@@ -1196,6 +1195,9 @@ final class Browser: NSObject, ObservableObject {
         Favicons.shared.relook(tabs.filter { !$0.asleep })
     }
 
+    /// The session as it stands, gathered here and written by Session's own
+    /// queue — not here on the main thread, which every pin, move and
+    /// profile switch used to wait on (2 Oct 2026). `now` waits for it.
     private func writeSession(now: Bool = false) {
         // A private window is in no session: nothing of it comes back.
         guard !isPrivate else { return }
@@ -1230,7 +1232,7 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// The app is quitting. Whatever the debounce above was waiting out, it
-    /// stops waiting: this writes straight to disk, on the thread asking to
+    /// stops waiting: this waits for the disk, on the thread asking to
     /// quit, before there is a process left to finish the wait on its behalf.
     func flushSession() {
         writeSession(now: true)
@@ -1330,7 +1332,8 @@ final class Browser: NSObject, ObservableObject {
             } else {
                 newTab()
             }
-            writeSession(now: true)
+            // Landing somewhere already has the session written; the pin
+            // itself is in it as before, address and letter.
             return
         }
 
