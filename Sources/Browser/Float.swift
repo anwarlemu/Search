@@ -108,6 +108,7 @@ final class Float {
             }
         }
         controls.onSkip = { [weak self] seconds in self?.onSkip?(seconds) }
+        controls.onNear = { [weak self] in self?.tick() }
         ground.addSubview(controls)
         self.controls = controls
 
@@ -128,11 +129,19 @@ final class Float {
                     return
                 }
 
-                self.onProgress? { through, playing in
-                    self.controls?.progress = through
-                    self.controls?.playing = playing
-                }
+                // The line is only drawn while the pointer is over the
+                // window; asked anyway, the page ran a script twice a second
+                // for a line nobody could see (2 Oct 2026).
+                if self.controls?.near == true { self.tick() }
             }
+        }
+    }
+
+    /// Asks the page where it is, for the line and the pause button.
+    private func tick() {
+        onProgress? { [weak self] through, playing in
+            self?.controls?.progress = through
+            self?.controls?.playing = playing
         }
     }
 
@@ -161,6 +170,9 @@ final class Float {
         var onReturn: (() -> Void)?
         var onPlayPause: (() -> Void)?
         var onSkip: ((Double) -> Void)?
+        /// The pointer just arrived: the line is about to show, so it is
+        /// brought up to date at once rather than at the next tick.
+        var onNear: (() -> Void)?
 
         var playing = true {
             didSet { pause.image = glyph(playing ? "pause.fill" : "play.fill", 17) }
@@ -178,7 +190,8 @@ final class Float {
         private let forward = NSButton()
         private let scrim = CAGradientLayer()
         private let line = Line()
-        private var near = false
+        /// Whether the pointer is over the window, and so the controls shown.
+        private(set) var near = false
 
         override init(frame: NSRect) {
             super.init(frame: frame)
@@ -273,6 +286,7 @@ final class Float {
 
         private func fade(to value: CGFloat) {
             near = value > 0
+            if near { onNear?() }
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.16
                 buttons.forEach { $0.animator().alphaValue = value }
