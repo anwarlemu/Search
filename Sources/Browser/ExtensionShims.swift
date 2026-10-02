@@ -2178,8 +2178,7 @@ enum ExtensionShims {
             // Those Chrome grants without a word, having nothing to warn of.
             let silent: Set<String> = ["tabGroups", "sidePanel", "offscreen", "idle", "power", "fontSettings", "search",
                                        "system.cpu", "system.memory", "system.display", "favicon"]
-            let names = wanted.map { $0.replacingOccurrences(of: ".", with: " ") }.joined(separator: ", ")
-            let yes = wanted.allSatisfy(silent.contains) ? true : await owner.ask(more: names, context: context)
+            let yes = wanted.allSatisfy(silent.contains) ? true : await owner.ask(more: wanted.filter { !silent.contains($0) }, context: context)
             guard yes else { return false }
             let had = Store.settings.stringArray(forKey: "extensions.granted.\(id)") ?? []
             Store.settings.set(Array(Set(had + wanted)).sorted(), forKey: "extensions.granted.\(id)")

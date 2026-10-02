@@ -620,28 +620,42 @@ final class Extensions: NSObject, ObservableObject {
             let hosts = patterns.compactMap(\.host).filter { !$0.isEmpty }
             out.append("Read and change what's on " + (hosts.prefix(4).joined(separator: ", ")) + (hosts.count > 4 ? " and \(hosts.count - 4) more" : ""))
         }
-        let words: [WKWebExtension.Permission: String] = [
-            .tabs: "See your open tabs and their addresses",
-            .cookies: "Read and change cookies",
-            .webNavigation: "See where you go",
-            .webRequest: "See the requests pages make",
-            .declarativeNetRequest: "Block or change requests pages make",
-            .clipboardWrite: "Write to the clipboard",
-            .nativeMessaging: "Talk to apps on this Mac",
-            .scripting: "Run scripts in pages",
-        ]
         for (permission, sentence) in words where found.requestedPermissions.contains(permission) && !added.contains(permission.rawValue) {
             out.append(sentence)
         }
-        // Chrome's own, which Search answers itself.
-        let ours: [(String, String)] = [
-            ("userScripts", "Run scripts you add to it on websites"), ("history", "Read and change your history"),
-            ("bookmarks", "Read and change your bookmarks"), ("downloads", "Manage your downloads"),
-            ("privacy", "Change your privacy settings"), ("browsingData", "Clear your browsing data"),
-            ("management", "See your other extensions"), ("notifications", "Show notifications"),
-        ]
         for (name, sentence) in ours where declared.contains(name) { out.append(sentence) }
         return out
+    }
+
+    /// WebKit's permissions, in words.
+    private static let words: [(WKWebExtension.Permission, String)] = [
+        (.tabs, "See your open tabs and their addresses"),
+        (.cookies, "Read and change cookies"),
+        (.webNavigation, "See where you go"),
+        (.webRequest, "See the requests pages make"),
+        (.declarativeNetRequest, "Block or change requests pages make"),
+        (.clipboardWrite, "Write to the clipboard"),
+        (.nativeMessaging, "Talk to apps on this Mac"),
+        (.scripting, "Run scripts in pages"),
+    ]
+    /// Chrome's own, which Search answers itself.
+    private static let ours: [(String, String)] = [
+        ("userScripts", "Run scripts you add to it on websites"), ("history", "Read and change your history"),
+        ("bookmarks", "Read and change your bookmarks"), ("downloads", "Manage your downloads"),
+        ("privacy", "Change your privacy settings"), ("browsingData", "Clear your browsing data"),
+        ("management", "See your other extensions"), ("notifications", "Show notifications"),
+    ]
+
+    /// One permission in words — the same sentence the install sheet uses,
+    /// for one asked for later. Nil for one that has no sentence.
+    static func sentence(for name: String) -> String? {
+        words.first { $0.0.rawValue == name }?.1 ?? ours.first { $0.0 == name }?.1
+    }
+
+    /// What a question about `names` says: their sentences where there are
+    /// any, the names themselves where there aren't (2 Oct 2026).
+    static func describe(asking names: [String]) -> String {
+        "It will be able to:\n• " + names.map { sentence(for: $0) ?? $0.replacingOccurrences(of: ".", with: " ") }.joined(separator: "\n• ")
     }
 
     private func ask(install name: String, wants: [String], icon: NSImage?) async -> Bool {
@@ -654,8 +668,8 @@ final class Extensions: NSObject, ObservableObject {
 
     /// An extension asking, through permissions.request, for one of the
     /// permissions Search answers itself.
-    func ask(more names: String, context: WKWebExtensionContext) async -> Bool {
-        await ask("asks for more access", detail: names, context: context)
+    func ask(more names: [String], context: WKWebExtensionContext) async -> Bool {
+        await ask("asks for more access", detail: Extensions.describe(asking: names), context: context)
     }
 
     private func ask(_ question: String, detail: String, context: WKWebExtensionContext) async -> Bool {
@@ -855,7 +869,7 @@ extension Extensions: WKWebExtensionControllerDelegate {
     }
 
     func webExtensionController(_ controller: WKWebExtensionController, promptForPermissions permissions: Set<WKWebExtension.Permission>, in tab: (any WKWebExtensionTab)?, for extensionContext: WKWebExtensionContext) async -> (Set<WKWebExtension.Permission>, Date?) {
-        let detail = permissions.map(\.rawValue).sorted().joined(separator: ", ")
+        let detail = Extensions.describe(asking: permissions.map(\.rawValue).sorted())
         return await ask("asks for more access", detail: detail, context: extensionContext) ? (permissions, nil) : ([], nil)
     }
 
