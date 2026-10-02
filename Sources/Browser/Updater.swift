@@ -84,6 +84,9 @@ final class Updater: ObservableObject {
     }
 
     @Published private(set) var stage: Stage = .none
+    /// How much of the ZIP has arrived, nought to one, while fetching. Nought
+    /// as well when the server didn't say how big it is.
+    @Published private(set) var fetched: Double = 0
     /// True while the file is being fetched.
     @Published private(set) var checking = false
     /// When the file was last read, for the line in Settings.
@@ -170,10 +173,13 @@ final class Updater: ObservableObject {
         case .none, .offered: break
         }
         stage = .fetching(release)
+        fetched = 0
         Task.detached(priority: .utility) {
             let worked: Bool
             do {
-                try await Swap.install(release)
+                try await Swap.install(release) { fraction in
+                    Task { @MainActor in Updater.shared.fetched = fraction }
+                }
                 worked = true
             } catch {
                 worked = false
@@ -270,7 +276,7 @@ private enum Swap {
         target.deletingLastPathComponent().appendingPathComponent(target.lastPathComponent + ".old")
     }
 
-    static func install(_ release: Updater.Release) async throws {
+    static func install(_ release: Updater.Release, progress: @escaping @Sendable (Double) -> Void) async throws {
         let files = FileManager.default
         // No Team ID on this build means it was signed ad hoc — a development
         // build. Nothing is ever swapped in under an app that could not be
@@ -291,7 +297,7 @@ private enum Swap {
         defer { try? files.removeItem(at: scratch) }
 
         let zip = scratch.appendingPathComponent("Browser.zip")
-        try await download(release.archive, to: zip)
+        try await download(release.archive, to: zip, progress: progress)
         if let expected = release.sha256 {
             guard try digest(of: zip) == expected else { throw Refused.hash }
         }
@@ -304,16 +310,38 @@ private enum Swap {
         try swap(fresh)
     }
 
-    private static func download(_ url: URL, to file: URL) async throws {
+    /// Streamed to the file in pieces, so how far along it is can be said
+    /// as it goes — a download that only ever said "downloading…" looked
+    /// stuck on a slow line (2 Oct 2026). Every hundredth, not every piece.
+    private static func download(
+        _ url: URL, to file: URL, progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 60
-        let (got, response) = try await URLSession.shared.download(for: request)
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
         guard (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true else {
             throw Refused.download
         }
-        // The session's copy lasts only until this returns.
-        try FileManager.default.moveItem(at: got, to: file)
+        guard FileManager.default.createFile(atPath: file.path, contents: nil) else { throw Refused.download }
+        let handle = try FileHandle(forWritingTo: file)
+        defer { try? handle.close() }
+        let expected = Double(response.expectedContentLength)
+        var piece = Data(capacity: 1 << 16)
+        var got = 0.0, said = 0.0
+        for try await byte in bytes {
+            piece.append(byte)
+            guard piece.count == 1 << 16 else { continue }
+            try handle.write(contentsOf: piece)
+            got += Double(piece.count)
+            piece.removeAll(keepingCapacity: true)
+            if expected > 0, got / expected - said >= 0.01 {
+                said = got / expected
+                progress(said)
+            }
+        }
+        if !piece.isEmpty { try handle.write(contentsOf: piece) }
+        progress(1)
     }
 
     private static func digest(of file: URL) throws -> String {
