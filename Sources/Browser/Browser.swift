@@ -555,10 +555,23 @@ final class Browser: NSObject, ObservableObject {
         Vault.off({ Vault.forget(host: login.host, user: login.user) }) { [weak self] in self?.relist() }
     }
 
+    /// Behind the same proof as showing one: a password on the clipboard
+    /// is a password shown to whatever reads the clipboard. And off it
+    /// again a minute later, unless something else has been copied since
+    /// (2 Oct 2026).
     func copy(_ login: Login) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(login.password, forType: .string)
-        announce("Password copied")
+        Vault.prove("copy the password for \(login.host)") { [weak self] ok in
+            guard ok else { return }
+            let board = NSPasteboard.general
+            board.clearContents()
+            board.setString(login.password, forType: .string)
+            let put = board.changeCount
+            DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+                guard board.changeCount == put else { return }
+                board.clearContents()
+            }
+            self?.announce("Password copied")
+        }
     }
 
     /// What came back from another browser's store, put in the keychain.
