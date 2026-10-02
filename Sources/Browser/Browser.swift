@@ -2199,13 +2199,25 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         return tab.web
     }
 
-    /// Anything the window can't show is something to keep instead.
+    /// Anything the window can't show is something to keep instead — with
+    /// two exceptions. A frame inside a page is kept only when the server
+    /// calls it an attachment: anything else it answers with that WebKit
+    /// won't draw is dropped, not saved. Stripe's hidden frame and YouTube
+    /// left "inner.html" and "www.youtube.com.html" in Downloads this way
+    /// (2 Oct 2026). And a page that is itself HTML is shown however WebKit
+    /// rates it; a web page is never a file to keep.
     func webView(
         _ webView: WKWebView,
         decidePolicyFor response: WKNavigationResponse,
         decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
     ) {
-        decisionHandler(response.canShowMIMEType ? .allow : .download)
+        if response.canShowMIMEType { return decisionHandler(.allow) }
+        let http = response.response as? HTTPURLResponse
+        let attachment = http?.value(forHTTPHeaderField: "Content-Disposition")?.lowercased().hasPrefix("attachment") == true
+        let type = (response.response.mimeType ?? "").lowercased()
+        let page = type.contains("html") || type.hasPrefix("text/")
+        if !response.isForMainFrame { return decisionHandler(attachment ? .download : .cancel) }
+        decisionHandler(page && !attachment ? .allow : .download)
     }
 
     func webView(
