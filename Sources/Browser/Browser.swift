@@ -807,13 +807,13 @@ final class Browser: NSObject, ObservableObject {
             edit()
             return
         }
-        tabDraft = Address.pretty(url)
+        tabDraft = prefill(url)
         editingTab = tab.id
     }
 
     func commitTabEdit() {
         guard let id = editingTab, let tab = tabs.first(where: { $0.id == id }) else { return }
-        guard let url = Google.destination(for: tabDraft) else {
+        guard let url = prefilled(tabDraft) ?? Google.destination(for: tabDraft) else {
             // Stay put and say so, rather than quietly throwing the edit away.
             refusals += 1
             return
@@ -825,6 +825,24 @@ final class Browser: NSObject, ObservableObject {
     func cancelTabEdit() {
         editingTab = nil
         tabDraft = ""
+    }
+
+    /// What a field was last filled with, and the address it stood for.
+    /// The short form drops the scheme, the port, the query and the
+    /// fragment; Return on it untouched went to what was left —
+    /// localhost:3000 to http://localhost (2 Oct 2026). The field still
+    /// reads short; only the whole address is what it means.
+    private var filled: (text: String, url: URL)?
+
+    private func prefill(_ url: URL) -> String {
+        let text = Address.pretty(url)
+        filled = (text, url)
+        return text
+    }
+
+    private func prefilled(_ text: String) -> URL? {
+        guard let filled, filled.text == text else { return nil }
+        return filled.url
     }
 
     // MARK: - saying so
@@ -1865,7 +1883,7 @@ final class Browser: NSObject, ObservableObject {
     /// and Escape puts it back.
     func edit() {
         summoning = false
-        typed = active?.address.map { Address.pretty($0) } ?? ""
+        typed = active?.address.map { prefill($0) } ?? ""
         editing = true
         focusRequest += 1
     }
@@ -1909,6 +1927,8 @@ final class Browser: NSObject, ObservableObject {
         let target: URL?
         if let picked, offers.indices.contains(picked) {
             target = offers[picked].url
+        } else if let whole = prefilled(typed) {
+            target = whole
         } else if ending != nil {
             target = Address.url(from: completed)
         } else {
