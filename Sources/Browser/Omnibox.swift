@@ -60,6 +60,7 @@ struct Omnibox: View {
 
     private var field: some View {
         AddressField(browser: browser)
+            .frame(maxWidth: .infinity)
             .frame(height: 22)
             .padding(.horizontal, 22)
             .padding(.vertical, 14)
@@ -136,6 +137,7 @@ struct Omnibox: View {
             }
         }
         .padding(6)
+        .frame(maxWidth: .infinity)
         .background(Palette.ground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)

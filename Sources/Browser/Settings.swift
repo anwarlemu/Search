@@ -446,11 +446,19 @@ struct SettingsPanel: View {
             }
             Card {
                 Line("History", "Every address you have been to") {
-                    Pill("Clear") { browser.clearHistory() }
+                    Pill("Clear") {
+                        confirm("Clear your history?", "Every address you have been to, gone from the field and the History menu.", "Clear") {
+                            browser.clearHistory()
+                        }
+                    }
                 }
                 Rule()
                 Line("Cookies and sign-ins", "Signs you out of every site") {
-                    Pill("Sign out of everything") { browser.clearSites() }
+                    Pill("Sign out of everything") {
+                        confirm("Sign out of every site?", "Cookies and everything else sites left here go; you sign in again where you need to.", "Sign out") {
+                            browser.clearSites()
+                        }
+                    }
                 }
                 Rule()
                 Line("Cache", "Only what was fetched to draw pages") {
@@ -539,6 +547,24 @@ struct SettingsPanel: View {
 
     // MARK: - doing
 
+    /// The two that can't be undone ask first, in a sheet on this window.
+    /// One click used to be enough to lose a year of history (2 Oct 2026).
+    private func confirm(_ title: String, _ detail: String, _ verb: String, then act: @escaping () -> Void) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.addButton(withTitle: verb)
+        alert.addButton(withTitle: "Cancel")
+        let finish: (NSApplication.ModalResponse) -> Void = { answer in
+            if answer == .alertFirstButtonReturn { act() }
+        }
+        if let window = browser.window ?? Links.window {
+            alert.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            finish(alert.runModal())
+        }
+    }
+
     private func chooseFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -589,6 +615,18 @@ struct Segmented<Option: Hashable>: View {
                     .onTapGesture {
                         withAnimation(Motion.settle) { selection = option }
                     }
+                    // A shape with a tap on it is nothing to the keyboard or
+                    // to VoiceOver; each choice is a button that can take
+                    // focus and be pressed with space (2 Oct 2026).
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(title)
+                    .accessibilityAddTraits(option == selection ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityAction { withAnimation(Motion.settle) { selection = option } }
+                    .focusable()
+                    .onKeyPress(.space) {
+                        withAnimation(Motion.settle) { selection = option }
+                        return .handled
+                    }
             }
         }
         .padding(2)
@@ -614,6 +652,16 @@ struct Switch: View {
             .contentShape(Capsule())
             .onTapGesture { withAnimation(Motion.settle) { on.toggle() } }
             .animation(Motion.settle, value: on)
+            // See Segmented: a toggle to VoiceOver, and space flips it.
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isToggle)
+            .accessibilityValue(on ? "On" : "Off")
+            .accessibilityAction { withAnimation(Motion.settle) { on.toggle() } }
+            .focusable()
+            .onKeyPress(.space) {
+                withAnimation(Motion.settle) { on.toggle() }
+                return .handled
+            }
     }
 }
 

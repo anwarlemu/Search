@@ -18,6 +18,9 @@ enum Palette {
     static let hairline = Color(nsColor: NS.hairline)   // neutral-200 · neutral-800
     static let wash = Color(nsColor: NS.wash)           // the live tab
     static let hover = Color(nsColor: NS.hover)         // the one under the pointer
+    /// The dimming under a panel. A tenth of black is a dimming on white
+    /// and nothing at all on a dark ground, which wants a third (2 Oct 2026).
+    static let scrim = Color(nsColor: NS.scrim)
 
     /// The same colours for the AppKit corners of the app — a text field's
     /// ink, a window's background — which want an NSColor and keep it.
@@ -31,11 +34,12 @@ enum Palette {
         static let hover = pair(0.965, 0.15)
         /// The resting traffic lights, drawn by hand when the app is behind.
         static let resting = pair(0.80, 0.30)
+        static let scrim = pair(0, 0, alpha: (0.10, 0.35))
 
-        private static func pair(_ light: CGFloat, _ dark: CGFloat) -> NSColor {
+        private static func pair(_ light: CGFloat, _ dark: CGFloat, alpha: (CGFloat, CGFloat) = (1, 1)) -> NSColor {
             NSColor(name: nil) { appearance in
                 let dim = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-                return NSColor(white: dim ? dark : light, alpha: 1)
+                return NSColor(white: dim ? dark : light, alpha: dim ? alpha.1 : alpha.0)
             }
         }
     }

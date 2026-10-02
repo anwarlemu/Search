@@ -52,10 +52,10 @@ struct BrowserApp: App {
                 Button("Find on Page…") { current.openFind() }
                     .keyboardShortcut(current.keys.menu(.findOnPage))
                     .disabled(current.active?.isBlank ?? true)
-                Button("Find Next") { current.look(forward: true) }
+                Button("Find Next") { FindBar.look(current, forward: true) }
                     .keyboardShortcut(current.keys.menu(.findNext))
                     .disabled(!current.finding)
-                Button("Find Previous") { current.look(forward: false) }
+                Button("Find Previous") { FindBar.look(current, forward: false) }
                     .keyboardShortcut(current.keys.menu(.findPrevious))
                     .disabled(!current.finding)
             }
@@ -177,18 +177,10 @@ struct BrowserApp: App {
                 Button("Show Bookmarks…") { current.bookmarking = true }
                     .keyboardShortcut(current.keys.menu(.bookmarks))
                 Divider()
-                BookmarkTree(nodes: current.bookmarks.roots) { current.visit($0) }
+                BookmarkMenu(bookmarks: current.bookmarks, browser: current)
             }
             CommandMenu("History") {
-                Section("Recently Visited") {
-                    ForEach(current.recentlyVisited) { trace in
-                        Button {
-                            current.open(trace.url, foreground: true)
-                        } label: {
-                            MenuLine(title: trace.title.isEmpty ? trace.key : trace.title, url: trace.url)
-                        }
-                    }
-                }
+                RecentMenu(history: current.history, browser: current)
                 if !current.ghosts.isEmpty {
                     Section("Recently Closed") {
                         ForEach(current.ghosts.reversed().prefix(10)) { ghost in
@@ -260,23 +252,53 @@ private struct AnyPrivateScene<Base: Scene>: Scene {
     var body: some Scene { base }
 }
 
-/// The bookmarks, as menus within menus, for the menu bar.
+/// The bookmarks, as menus within menus, for the menu bar. Watching the
+/// bookmarks and not the browser: the menus were drawn again, every item of
+/// them, with every keystroke in the address field (2 Oct 2026).
+private struct BookmarkMenu: View {
+    @ObservedObject var bookmarks: Bookmarks
+    let browser: Browser
+
+    var body: some View {
+        BookmarkTree(nodes: bookmarks.roots, browser: browser)
+    }
+}
+
 private struct BookmarkTree: View {
     let nodes: [Bookmark]
-    let open: (URL) -> Void
+    let browser: Browser
 
     var body: some View {
         ForEach(nodes) { node in
             if node.isFolder {
                 Menu(node.title) {
                     if let kids = node.children, !kids.isEmpty {
-                        BookmarkTree(nodes: kids, open: open)
+                        BookmarkTree(nodes: kids, browser: browser)
                     } else {
                         Text("Empty")
                     }
                 }
             } else if let text = node.url, let url = URL(string: text) {
-                Button(node.title) { open(url) }
+                Button(node.title) { browser.visit(url) }
+            }
+        }
+    }
+}
+
+/// The last few places, for the History menu — drawn again when the history
+/// changes, and not otherwise.
+private struct RecentMenu: View {
+    @ObservedObject var history: History
+    let browser: Browser
+
+    var body: some View {
+        Section("Recently Visited") {
+            ForEach(history.recent(8)) { trace in
+                Button {
+                    browser.open(trace.url, foreground: true)
+                } label: {
+                    MenuLine(title: trace.title.isEmpty ? trace.key : trace.title, url: trace.url)
+                }
             }
         }
     }
@@ -293,7 +315,7 @@ private struct MenuLine: View {
             Label {
                 Text(title)
             } icon: {
-                Image(nsImage: MenuLine.small(icon))
+                Image(nsImage: MenuLine.small(icon, for: host))
             }
         } else {
             Text(title)
@@ -301,9 +323,16 @@ private struct MenuLine: View {
     }
 
     /// The cached icon is sixty-four points across; a menu wants sixteen.
-    private static func small(_ icon: NSImage) -> NSImage {
+    /// One copy per icon, kept: a fresh copy for every line on every draw
+    /// of the menu added up (2 Oct 2026).
+    private static var smalls: [String: (icon: NSImage, small: NSImage)] = [:]
+
+    private static func small(_ icon: NSImage, for host: String) -> NSImage {
+        // The same icon, not just the same host: a site's icon can change.
+        if let kept = smalls[host], kept.icon === icon { return kept.small }
         let copy = icon.copy() as! NSImage
         copy.size = NSSize(width: 16, height: 16)
+        smalls[host] = (icon, copy)
         return copy
     }
 }
@@ -546,6 +575,13 @@ struct ContentView: View {
             // the main window, never a private one.
             if !browser.isPrivate { Links.hand(to: browser) }
         }
+        // The monitor holds this view, and the view its browser: a closed
+        // private window kept its whole browser alive until the monitor was
+        // taken down with it (2 Oct 2026).
+        .onDisappear {
+            if let keys { NSEvent.removeMonitor(keys) }
+            keys = nil
+        }
     }
 
     /// Give the keyboard back to the page once the field is done with it.
@@ -680,7 +716,7 @@ struct ContentView: View {
     ) -> some View {
         GeometryReader { geometry in
             ZStack {
-                Color.black.opacity(0.10)
+                Palette.scrim
                     .ignoresSafeArea()
                     .onTapGesture(perform: close)
                 panel()
@@ -831,6 +867,13 @@ struct ContentView: View {
         // Escape puts the page back. On a blank tab there is no page to put
         // back, so it belongs to whatever else wants it.
         if event.keyCode == 53 {
+            // The welcome covers everything, so it goes first — and goes
+            // for good, as Skip does (2 Oct 2026).
+            if browser.welcoming {
+                browser.prefs.welcomed = true
+                browser.welcoming = false
+                return true
+            }
             if browser.dismissTopPanel() { return true }
             if browser.editingTab != nil {
                 browser.cancelTabEdit()
@@ -891,6 +934,13 @@ struct ContentView: View {
 
         // Everything else is a key in the map, yours or the app's own.
         guard let chord = Chord(event: event) else { return false }
+        // With the welcome up there are no tabs to be had and no page to
+        // move about on: the app's keys wait, bar the one that puts the
+        // welcome away. Anything not ours — ⌘Q — still passes.
+        if browser.welcoming {
+            if browser.keys.command(for: chord) == .welcome { browser.welcoming = false }
+            return ours(chord)
+        }
         // ⌘Z while pointing: the last thing hidden comes back. Everywhere
         // else undo belongs to the page.
         if chord == Chord(key: "z", command: true), browser.veiling {
@@ -935,10 +985,24 @@ struct ContentView: View {
             browser.visit(url)
             return true
         }
-        // ⌘← and ⌘→, for hands that never learned the brackets.
+        // ⌘← and ⌘→, for hands that never learned the brackets. Not while
+        // the caret is in something on the page: there they are the way to
+        // the start and end of a line, and leaving a form mid-word to go
+        // back a page is the last thing anyone meant (2 Oct 2026).
+        if browser.active?.typing == true { return false }
         if chord == Chord(key: "left", command: true) { browser.back(); return true }
         if chord == Chord(key: "right", command: true) { browser.forward(); return true }
         return false
+    }
+
+    /// A key the map below would answer: a command, a key of your own, one
+    /// of the nine, or the arrows that stand in for the brackets.
+    private func ours(_ chord: Chord) -> Bool {
+        if browser.keys.command(for: chord) != nil || browser.keys.custom(for: chord) != nil { return true }
+        if chord.command, chord.key == "left" || chord.key == "right" { return true }
+        guard chord.key.count == 1, let digit = Int(chord.key), (1...9).contains(digit) else { return false }
+        let one = chord.with(key: "1")
+        return one == browser.keys.chord(for: .tabNumber) || one == browser.keys.chord(for: .profileNumber)
     }
 
     /// True while the page on screen has the keyboard.
@@ -978,8 +1042,8 @@ struct ContentView: View {
         case .reload: browser.reload()
         case .hardReload: browser.hardReload()
         case .findOnPage: browser.openFind()
-        case .findNext: browser.look(forward: true)
-        case .findPrevious: browser.look(forward: false)
+        case .findNext: FindBar.look(browser, forward: true)
+        case .findPrevious: FindBar.look(browser, forward: false)
         case .print: browser.printPage()
         case .copyAddress: browser.copyAddress()
         case .pasteAndGo: browser.pasteAndGo()

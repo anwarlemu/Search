@@ -14,6 +14,8 @@ import SwiftUI
 
 extension Browser {
     /// A name asked for in a sheet, the old one in the field if there is one.
+    /// On this browser's window — a private window asking got the sheet on
+    /// the main one (2 Oct 2026).
     func askProfileName(_ title: String, current: String = "", then done: @escaping (String) -> Void) {
         let alert = NSAlert()
         alert.messageText = title
@@ -29,7 +31,7 @@ extension Browser {
             guard answer == .alertFirstButtonReturn, !name.isEmpty else { return }
             done(name)
         }
-        if let window = Links.window {
+        if let window = window ?? Links.window {
             alert.beginSheetModal(for: window, completionHandler: finish)
         } else {
             finish(alert.runModal())
@@ -64,7 +66,7 @@ extension Browser {
             guard answer == .alertFirstButtonReturn, let self else { return }
             deleteProfile(index)
         }
-        if let window = Links.window {
+        if let window = window ?? Links.window {
             alert.beginSheetModal(for: window, completionHandler: finish)
         } else {
             finish(alert.runModal())
@@ -75,8 +77,19 @@ extension Browser {
 /// The profile you are in, as a small pill with the others behind it. Only
 /// there once there is more than one: a browser with one profile has no
 /// reason to say so.
-struct ProfileDoor: View {
-    @ObservedObject var browser: Browser
+struct ProfileDoor: View, Equatable {
+    let browser: Browser
+    /// The names and the one you are in, as values: the door is then drawn
+    /// again when a profile changes, not with every change to the browser
+    /// (2 Oct 2026).
+    let names: [String]
+    let profile: Int
+    /// The key for the first profile, for the tooltip.
+    let key: String?
+
+    static func == (a: ProfileDoor, b: ProfileDoor) -> Bool {
+        a.browser === b.browser && a.names == b.names && a.profile == b.profile && a.key == b.key
+    }
 
     var body: some View {
         if browser.isPrivate {
@@ -88,11 +101,11 @@ struct ProfileDoor: View {
                 .frame(height: 26)
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Palette.wash.opacity(0.55)))
                 .help("Nothing in this window is kept: no history, cookies, sign-ins, cache or downloads list")
-        } else if browser.profileNames.count > 1 {
+        } else if names.count > 1 {
             Menu {
-                ForEach(Array(browser.profileNames.enumerated()), id: \.offset) { index, name in
+                ForEach(Array(names.enumerated()), id: \.offset) { index, name in
                     Button { browser.switchProfile(to: index) } label: {
-                        if index == browser.profile {
+                        if index == profile {
                             Label(name, systemImage: "checkmark")
                         } else {
                             Text(name)
@@ -107,7 +120,7 @@ struct ProfileDoor: View {
                 // The number, not the name: the row stays the same width
                 // whatever a profile is called. The name is in the list
                 // behind it, and on hover.
-                Text("\(browser.profile + 1)")
+                Text("\(profile + 1)")
                     .font(.system(size: 11.5, weight: .medium).monospacedDigit())
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
@@ -121,7 +134,7 @@ struct ProfileDoor: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Profile \(browser.profile + 1) · \(browser.profileNames[browser.profile])   " + ((browser.keys.chord(for: .profileNumber)?.label).map { "\($0) \($0.dropLast())2 …" } ?? ""))
+            .help("Profile \(profile + 1) · \(names.indices.contains(profile) ? names[profile] : "")   " + (key.map { "\($0) \($0.dropLast())2 …" } ?? ""))
         }
     }
 }

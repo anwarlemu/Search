@@ -11,8 +11,11 @@ struct WelcomePanel: View {
     @State private var page = 0
     @State private var forward = true
 
-    // Bringing things over.
-    @State private var source: Chromium.Source? = Chromium.installed().first
+    // Bringing things over. Which browsers are here is a walk through
+    // Application Support, so it is asked once as the panel comes up, not
+    // on every draw of the page (2 Oct 2026).
+    @State private var sources: [Chromium.Source] = []
+    @State private var source: Chromium.Source?
     @State private var wantsPasswords = true
     @State private var wantsHistory = true
     @State private var wantsBookmarks = true
@@ -52,6 +55,10 @@ struct WelcomePanel: View {
         }
         .animation(Motion.glide, value: page)
         .transition(.opacity)
+        .onAppear {
+            sources = Chromium.installed()
+            source = sources.first
+        }
     }
 
     // MARK: - the pages
@@ -77,11 +84,10 @@ struct WelcomePanel: View {
         VStack(alignment: .leading, spacing: 22) {
             heading("Bring things over.", "Passwords go into your keychain, bookmarks into the menu, and history means the address field already knows where you go. Nothing in the other browser changes.")
 
-            let sources = Chromium.installed()
             if sources.isEmpty {
                 Text("No other browser found on this Mac — nothing to bring.")
                     .font(.system(size: 13))
-                    .foregroundStyle(Palette.faint)
+                    .foregroundStyle(Palette.muted)
             } else {
                 VStack(alignment: .leading, spacing: 14) {
                     if sources.count > 1 {
@@ -155,16 +161,18 @@ struct WelcomePanel: View {
                     if asked, !isDefault {
                         Text("macOS asks in its own dialog")
                             .font(.system(size: 13))
-                            .foregroundStyle(Palette.faint)
+                            .foregroundStyle(Palette.muted)
                     }
                 }
             }
             .animation(Motion.settle, value: isDefault)
 
             VStack(alignment: .leading, spacing: 8) {
+                // Muted, not faint, for anything read: faint is the
+                // hairlines' and the dots' (2 Oct 2026).
                 Text("Three things worth knowing")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Palette.faint)
+                    .foregroundStyle(Palette.muted)
                     .textCase(.uppercase)
                     .tracking(0.6)
                     .padding(.top, 6)
@@ -333,7 +341,7 @@ struct WelcomePanel: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 13.5)).foregroundStyle(Palette.ink)
-                    Text(detail).font(.system(size: 11.5)).foregroundStyle(Palette.faint)
+                    Text(detail).font(.system(size: 11.5)).foregroundStyle(Palette.muted)
                 }
                 Spacer()
                 Switch(on: $on)

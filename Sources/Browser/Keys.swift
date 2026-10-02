@@ -39,7 +39,12 @@ struct Chord: Hashable {
         if let name = Chord.named[event.keyCode] {
             key = name
         } else {
-            guard var text = event.charactersIgnoringModifiers?.lowercased(), text.count == 1 else { return nil }
+            // "Ignoring modifiers" keeps ⇧, so ⇧⌘] arrived as "}" and never
+            // matched "shift+cmd+]". The key with nothing held is the one
+            // the map is written in; the flags below carry the ⇧ (2 Oct 2026).
+            let plain = event.characters(byApplyingModifiers: [])
+            guard var text = (plain?.count == 1 ? plain : event.charactersIgnoringModifiers)?.lowercased(),
+                  text.count == 1 else { return nil }
             // ⌘+ arrives as "=" or "+" depending on the keyboard: one key.
             if text == "+" { text = "=" }
             key = text
@@ -237,14 +242,16 @@ final class Keys: ObservableObject {
             }
         }
 
-        /// Keys a page may take for itself first — ⌘K in Slack, ⌘F in Docs —
-        /// and that come back to the browser when the page lets them pass.
-        /// Tabs, windows and profiles are always the browser's.
+        /// Keys a page may take for itself first — ⌘K in Slack, ⌘F in Docs,
+        /// ⌘S in Figma — and that come back to the browser when the page
+        /// lets them pass. Tabs, windows and profiles are always the
+        /// browser's.
         var pageFirst: Bool {
             switch self {
             case .switchTab, .findOnPage, .findNext, .findPrevious, .print, .copyAddress, .pasteAndGo,
                  .bookmark, .history, .downloads, .duplicate, .readingMode, .floatVideo, .hideElements,
-                 .hiddenHere, .zoomIn, .zoomOut, .actualSize, .inspector, .back, .forward, .bookmarks, .muteTab:
+                 .hiddenHere, .zoomIn, .zoomOut, .actualSize, .inspector, .back, .forward, .bookmarks, .muteTab,
+                 .hideTabs:
                 return true
             default:
                 return false
@@ -287,7 +294,16 @@ final class Keys: ObservableObject {
 
     @Published private(set) var chords: [Command: Chord] = [:]
     @Published private(set) var custom: [Custom] = []
-    @Published var recording: Target?
+    @Published var recording: Target? { didSet { reserved = nil } }
+    /// A key pressed while recording that macOS keeps for itself, so the
+    /// page can say why nothing happened.
+    @Published private(set) var reserved: Chord?
+
+    /// Quit, hide, the app switcher, Spotlight: taking any of these would
+    /// take them from every app, or do nothing, since macOS answers them
+    /// before this one sees them. ⌘W stays — closing a tab is what it is
+    /// for here (2 Oct 2026).
+    private static let macOS: Set<String> = ["cmd+q", "opt+cmd+q", "cmd+h", "opt+cmd+h", "cmd+tab", "shift+cmd+tab", "cmd+space"]
 
     private var byChord: [Chord: Command] = [:]
     private let store = Store.settings
@@ -389,6 +405,10 @@ final class Keys: ObservableObject {
         guard let chord = Chord(event: event) else { return true }
         let answer: Chord? = chord.key == "delete" && !chord.command && !chord.option && !chord.control ? nil : chord
         if let answer, !answer.usable { return true }
+        if let answer, Keys.macOS.contains(answer.text) {
+            reserved = answer
+            return true
+        }
         switch target {
         case .command(let command): set(answer, for: command)
         case .custom(let id): set(answer, forCustom: id)
@@ -457,7 +477,7 @@ struct ShortcutsPage: View {
     private func control(for target: Keys.Target, chord: Chord?, changed: Bool, reset: @escaping () -> Void) -> some View {
         HStack(spacing: 6) {
             if keys.recording == target {
-                Text("Press keys…")
+                Text(keys.reserved.map { "\($0.label) is macOS's — press another" } ?? "Press keys…")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
                 Pill("Cancel") { keys.recording = nil }
