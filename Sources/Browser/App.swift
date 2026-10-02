@@ -177,18 +177,10 @@ struct BrowserApp: App {
                 Button("Show Bookmarks…") { current.bookmarking = true }
                     .keyboardShortcut(current.keys.menu(.bookmarks))
                 Divider()
-                BookmarkTree(nodes: current.bookmarks.roots) { current.visit($0) }
+                BookmarkMenu(bookmarks: current.bookmarks, browser: current)
             }
             CommandMenu("History") {
-                Section("Recently Visited") {
-                    ForEach(current.recentlyVisited) { trace in
-                        Button {
-                            current.open(trace.url, foreground: true)
-                        } label: {
-                            MenuLine(title: trace.title.isEmpty ? trace.key : trace.title, url: trace.url)
-                        }
-                    }
-                }
+                RecentMenu(history: current.history, browser: current)
                 if !current.ghosts.isEmpty {
                     Section("Recently Closed") {
                         ForEach(current.ghosts.reversed().prefix(10)) { ghost in
@@ -260,23 +252,53 @@ private struct AnyPrivateScene<Base: Scene>: Scene {
     var body: some Scene { base }
 }
 
-/// The bookmarks, as menus within menus, for the menu bar.
+/// The bookmarks, as menus within menus, for the menu bar. Watching the
+/// bookmarks and not the browser: the menus were drawn again, every item of
+/// them, with every keystroke in the address field (2 Oct 2026).
+private struct BookmarkMenu: View {
+    @ObservedObject var bookmarks: Bookmarks
+    let browser: Browser
+
+    var body: some View {
+        BookmarkTree(nodes: bookmarks.roots, browser: browser)
+    }
+}
+
 private struct BookmarkTree: View {
     let nodes: [Bookmark]
-    let open: (URL) -> Void
+    let browser: Browser
 
     var body: some View {
         ForEach(nodes) { node in
             if node.isFolder {
                 Menu(node.title) {
                     if let kids = node.children, !kids.isEmpty {
-                        BookmarkTree(nodes: kids, open: open)
+                        BookmarkTree(nodes: kids, browser: browser)
                     } else {
                         Text("Empty")
                     }
                 }
             } else if let text = node.url, let url = URL(string: text) {
-                Button(node.title) { open(url) }
+                Button(node.title) { browser.visit(url) }
+            }
+        }
+    }
+}
+
+/// The last few places, for the History menu — drawn again when the history
+/// changes, and not otherwise.
+private struct RecentMenu: View {
+    @ObservedObject var history: History
+    let browser: Browser
+
+    var body: some View {
+        Section("Recently Visited") {
+            ForEach(history.recent(8)) { trace in
+                Button {
+                    browser.open(trace.url, foreground: true)
+                } label: {
+                    MenuLine(title: trace.title.isEmpty ? trace.key : trace.title, url: trace.url)
+                }
             }
         }
     }
@@ -293,7 +315,7 @@ private struct MenuLine: View {
             Label {
                 Text(title)
             } icon: {
-                Image(nsImage: MenuLine.small(icon))
+                Image(nsImage: MenuLine.small(icon, for: host))
             }
         } else {
             Text(title)
@@ -301,9 +323,16 @@ private struct MenuLine: View {
     }
 
     /// The cached icon is sixty-four points across; a menu wants sixteen.
-    private static func small(_ icon: NSImage) -> NSImage {
+    /// One copy per icon, kept: a fresh copy for every line on every draw
+    /// of the menu added up (2 Oct 2026).
+    private static var smalls: [String: (icon: NSImage, small: NSImage)] = [:]
+
+    private static func small(_ icon: NSImage, for host: String) -> NSImage {
+        // The same icon, not just the same host: a site's icon can change.
+        if let kept = smalls[host], kept.icon === icon { return kept.small }
         let copy = icon.copy() as! NSImage
         copy.size = NSSize(width: 16, height: 16)
+        smalls[host] = (icon, copy)
         return copy
     }
 }
