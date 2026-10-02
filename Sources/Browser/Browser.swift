@@ -2065,8 +2065,42 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         if ["http", "https", "file", "about", "data", "blob", "chrome-extension", "webkit-extension"].contains(scheme) {
             decisionHandler(.allow)
         } else {
-            NSWorkspace.shared.open(url)
             decisionHandler(.cancel)
+            openElsewhere(url, scheme: scheme, from: webView)
+        }
+    }
+
+    /// A link into another app — zoom:, slack:, an app's own scheme. Asked
+    /// about first, once per site and scheme: any page could open any app
+    /// on this Mac without a word, and did (2 Oct 2026). Mail is the one
+    /// everybody means, and goes straight through. "Always" is kept, except
+    /// in a private window, which keeps nothing.
+    private func openElsewhere(_ url: URL, scheme: String, from webView: WKWebView) {
+        let site = tab(for: webView)?.address?.host()?.lowercased() ?? ""
+        let key = "open.\(scheme)|\(site)"
+        if scheme == "mailto" || Store.settings.bool(forKey: key) {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        guard let app = NSWorkspace.shared.urlForApplication(toOpen: url) else {
+            announce("Nothing on this Mac opens \(scheme) links")
+            return
+        }
+        let name = app.deletingPathExtension().lastPathComponent
+        let alert = NSAlert()
+        alert.messageText = "Open in \(name)?"
+        alert.informativeText = "\(site.isEmpty ? "This page" : site) wants to open a \(scheme) link in \(name)."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = site.isEmpty ? "Always open \(scheme) links" : "Always for \(site)"
+        Dialogs.show(alert, over: webView) { [weak self] answer in
+            guard answer == .alertFirstButtonReturn else { return }
+            if alert.suppressionButton?.state == .on, self?.isPrivate == false {
+                Store.settings.set(true, forKey: key)
+            }
+            NSWorkspace.shared.open(url)
         }
     }
 
