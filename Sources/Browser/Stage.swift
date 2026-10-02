@@ -51,10 +51,12 @@ private struct Overlays: View {
             if let cover = tab.cover {
                 // The page as it was left, while it is rebuilt underneath —
                 // anchored where the page itself starts, and never in the
-                // way of a click meant for the page.
+                // way of a click meant for the page. At its own size, a
+                // point to the pixel (see Tab.snapshot), which is the size
+                // the page was laid out at: stretched to fit, a window
+                // resized while the tab slept showed a picture that jumped
+                // when the page came through (2 Oct 2026).
                 Image(nsImage: cover)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .clipped()
                     .allowsHitTesting(false)
