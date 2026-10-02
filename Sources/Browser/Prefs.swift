@@ -48,10 +48,28 @@ final class Preferences: ObservableObject {
     @Published var bare: Bool {
         didSet { store.set(bare, forKey: "bare") }
     }
-    /// How wide the column is. Pulled by its edge, and remembered.
+    /// How wide the column is. Pulled by its edge, and remembered — once
+    /// the hand has rested a moment, not at every pixel it passes through
+    /// (2 Oct 2026).
     @Published var sideWidth: CGFloat {
-        didSet { store.set(Double(sideWidth), forKey: "sidebar.width") }
+        willSet { widening = true }
+        didSet {
+            widening = false
+            keepWidth?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                store.set(Double(sideWidth), forKey: "sidebar.width")
+            }
+            keepWidth = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+        }
     }
+    private var keepWidth: DispatchWorkItem?
+    /// True for the instant a change of width is being announced, so the
+    /// window can tell one from any other setting — the column draws
+    /// itself for those, and the rest of the window needn't (see
+    /// Browser.follow).
+    private(set) var widening = false
     @Published var glyph: Glyph {
         didSet { store.set(glyph.rawValue, forKey: "glyph") }
     }

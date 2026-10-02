@@ -1163,9 +1163,16 @@ final class Browser: NSObject, ObservableObject {
             .store(in: &bag)
 
         // The window and the menus are drawn from this object; a setting that
-        // changes what they show has to be heard here.
+        // changes what they show has to be heard here. Not the column's
+        // width while its edge is pulled: the column watches that itself,
+        // and the whole window was redrawn for every pixel of the pull
+        // (2 Oct 2026). Only the field, centred over the page beside the
+        // column, is laid out from here and has to follow.
         prefs.objectWillChange
-            .sink { [weak self] in self?.objectWillChange.send() }
+            .sink { [weak self] in
+                guard let self, !prefs.widening || fieldShowing else { return }
+                objectWillChange.send()
+            }
             .store(in: &bag)
         keys.objectWillChange
             .sink { [weak self] in self?.objectWillChange.send() }
