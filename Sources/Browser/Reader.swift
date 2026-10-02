@@ -10,28 +10,37 @@ import Foundation
 enum Reader {
     static let script = """
     (function () {
-      function prose(el) {
-        var paragraphs = el.querySelectorAll('p');
-        if (paragraphs.length < 2) return 0;
-        var letters = 0;
-        for (var i = 0; i < paragraphs.length; i++) {
-          letters += (paragraphs[i].innerText || '').length;
+      // Each paragraph's letters, and each link, credited to every box above
+      // it in one walk up — rather than every box on the page asking for
+      // its paragraphs and reading each one's innerText, which laid the
+      // page out again per box and took seconds on a long one (2 Oct 2026).
+      function credit(tag, into, cap) {
+        var all = document.getElementsByTagName(tag);
+        var n = Math.min(all.length, cap);
+        for (var i = 0; i < n; i++) {
+          var worth = tag === 'p' ? (all[i].textContent || '').length : 1;
+          if (!worth) continue;
+          for (var el = all[i].parentElement; el && el !== document.body; el = el.parentElement) {
+            var had = into.get(el);
+            if (had) { had[0] += worth; had[1] += 1; } else { into.set(el, [worth, 1]); }
+          }
         }
-        if (letters < 400) return 0;
-        // A rail of related links has plenty of text and nothing to read.
-        var links = el.querySelectorAll('a').length;
-        return letters / (1 + links * 14);
       }
 
       function best() {
-        var candidates = document.querySelectorAll(
-          'article, main, [role="main"], .post, .entry, .article, .content, #content, div, section'
-        );
+        var prose = new Map(), links = new Map();
+        credit('p', prose, 4000);
+        credit('a', links, 8000);
+        var boxes = { DIV: 1, SECTION: 1, ARTICLE: 1, MAIN: 1 };
         var top = null, mark = 0;
-        for (var i = 0; i < candidates.length; i++) {
-          var score = prose(candidates[i]);
-          if (score > mark) { mark = score; top = candidates[i]; }
-        }
+        prose.forEach(function (had, el) {
+          if (!boxes[el.tagName] && el.getAttribute('role') !== 'main') return;
+          if (had[1] < 2 || had[0] < 400) return;
+          // A rail of related links has plenty of text and nothing to read.
+          var linked = links.get(el);
+          var score = had[0] / (1 + (linked ? linked[1] : 0) * 14);
+          if (score > mark) { mark = score; top = el; }
+        });
         return top;
       }
 
