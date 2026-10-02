@@ -59,29 +59,32 @@ struct SideBar: View {
             }
             .frame(height: Metrics.strip)
 
-            VStack(alignment: .leading, spacing: 0) {
-                // The traffic lights' corner, with back, forward and reload
-                // sitting right of them — the same three doors as the top
-                // bar, moved beside the lights since there's no far end of a
-                // row to put them at in this mode.
-                HStack(spacing: 0) {
-                    Color.clear.frame(width: Metrics.sideLights)
-                    Helm(browser: browser)
+            // A reader only to know the column's height, for how much of it
+            // the rows may have before they scroll.
+            GeometryReader { geo in
+                VStack(alignment: .leading, spacing: 0) {
+                    // The traffic lights' corner, with back, forward and reload
+                    // sitting right of them — the same three doors as the top
+                    // bar, moved beside the lights since there's no far end of a
+                    // row to put them at in this mode.
+                    HStack(spacing: 0) {
+                        Color.clear.frame(width: Metrics.sideLights)
+                        Helm(browser: browser)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(height: Metrics.strip)
+
+                    if browser.pinnedCount > 0 {
+                        pinned
+                            .padding(.bottom, 10)
+                    }
+
+                    rows(in: geo.size.height)
+
                     Spacer(minLength: 0)
                 }
-                .frame(height: Metrics.strip)
-
-                if browser.pinnedCount > 0 {
-                    pinned
-                        .padding(.bottom, 10)
-                }
-
-                loose
-                newTab
-
-                Spacer(minLength: 0)
+                .padding(.horizontal, 10)
             }
-            .padding(.horizontal, 10)
 
             VStack {
                 Spacer()
@@ -137,13 +140,48 @@ struct SideBar: View {
     /// from what was drawn rather than measured: a measurement would arrive a
     /// frame late, and for one frame the whole column would drag the window.
     private var rowsEnd: CGFloat {
+        Metrics.strip + pinBlock + looseHeight + 8
+    }
+
+    /// The pinned block, with the air under it.
+    private var pinBlock: CGFloat {
         let pins = browser.pinnedCount
         let cols = SideBar.pinColumns(pins)
         let pinRows = pins == 0 ? 0 : (pins + cols - 1) / cols
-        let pinBlock = pinRows == 0 ? 0
+        return pinRows == 0 ? 0
             : CGFloat(pinRows) * pinHeight + CGFloat(pinRows - 1) * SideBar.pinGap + 10
-        let loose = CGFloat(browser.tabs.count - pins) * (SideBar.row + SideBar.gap)
-        return Metrics.strip + pinBlock + loose + SideBar.row + 8
+    }
+
+    /// The loose rows and the new-tab row, as drawn.
+    private var looseHeight: CGFloat {
+        CGFloat(browser.tabs.count - browser.pinnedCount) * (SideBar.row + SideBar.gap) + SideBar.row
+    }
+
+    /// The foot's doors and the air around them, which the rows stop short of.
+    private static let foot: CGFloat = 44
+
+    /// The loose rows and the way to a new one. Exactly as tall as they are
+    /// while they fit, so the empty column under them is still the window's
+    /// to drag by; past what the window holds they take the room there is
+    /// and scroll inside it, the pins above and the foot below staying put.
+    /// Fifteen or so tabs used to run off the bottom (2 Oct 2026).
+    private func rows(in height: CGFloat) -> some View {
+        let room = max(0, height - Metrics.strip - pinBlock - SideBar.foot)
+        let scrolls = looseHeight > room + 0.5
+        return ScrollViewReader { reader in
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    loose
+                    newTab
+                }
+            }
+            .scrollDisabled(!scrolls)
+            .frame(height: min(looseHeight, room))
+            .onChange(of: browser.activeID) { _, id in
+                guard scrolls, let id else { return }
+                DispatchQueue.main.async { withAnimation(Motion.glide) { reader.scrollTo(id) } }
+            }
+        }
     }
 
     // MARK: - the pinned squares
@@ -298,7 +336,9 @@ struct SideBar: View {
                 .offset(y: held ? travel : aside(index, step: step))
                 .zIndex(held ? 1 : 0)
                 .shadow(color: .black.opacity(held ? 0.14 : 0), radius: 12, y: 4)
-                .gesture(reorder(tab: tab, index: index, step: step))
+                // Ahead of the column's own scrolling, as in the strip.
+                .highPriorityGesture(reorder(tab: tab, index: index, step: step))
+                .id(tab.id)
             }
         }
         .coordinateSpace(name: "rows")
