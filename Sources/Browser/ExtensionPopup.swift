@@ -26,7 +26,6 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// so "the current window" from a popup is the browser's, and so is the
     /// last focused one.
     private var page: PopupPage?
-    private var measuring: Timer?
     private(set) var extensionID: String?
     /// Whose popup it is, for the line that says it couldn't open.
     private var extensionName = ""
@@ -82,14 +81,11 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
             let spot = NSRect(x: content.bounds.maxX - 60, y: content.bounds.maxY - 40, width: 1, height: 1)
             popover.show(relativeTo: spot, of: content, preferredEdge: .minY)
         }
-        // Sized once loaded — or after a moment regardless, for a page that
-        // never finishes loading.
         // Measured when the document is built (see below) or has loaded;
         // a page slow to do either is measured anyway after a moment, and
         // shown regardless a little later.
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self, weak popover] in
-            guard let self, let popover, popover === self.popover else { return }
-            self.firstMeasure()
+            guard let self, let popover, popover === self.popover, self.watching == 0 else { return }
             self.follow()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self, weak popover] in
@@ -121,25 +117,17 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         }
     }
 
-    /// From the page's first load: sized, then followed as it grows — a
-    /// list filled in by a reply from the worker — for a few seconds.
+    /// From the page's first load: sized, then measured again each time its
+    /// document changes size — a list filled in by a reply from the worker
+    /// — as the page itself reports it (see changed). A timer measured
+    /// four times a second for six seconds before, forcing a layout each
+    /// time whether anything had moved or not (2 Oct 2026).
     private func follow() {
-        guard measuring == nil else { return }
         firstMeasure()
-        ticks = 0
-        var ticks = 0
-        measuring = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] timer in
-            MainActor.assumeIsolated {
-                ticks += 1
-                self?.grow()
-                if ticks > 24 { timer.invalidate() }
-            }
-        }
+        watch()
     }
 
     func close() {
-        measuring?.invalidate()
-        measuring = nil
         let closing = popover
         forget()
         closing?.performClose(nil)
@@ -153,6 +141,7 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         web = nil
         extensionID = nil
         measured = nil
+        watching = 0
     }
 
 
@@ -243,52 +232,60 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         reveal()
     }
 
-    /// How far the page reaches, as a function of "width" or "height":
-    /// its own width if it names one wider than the view, else its
-    /// narrowest (min-content — what is positioned off to the side doesn't
-    /// count, as in Chrome's measure), else, for a page that only fills the
-    /// view and has next to no width of its own, what its content spans.
-    /// Height: all it spans.
-    static let reach = """
-    ((key) => {
+    /// Settles the moment the document, its body or the body's first
+    /// element changes size — the shells popups build themselves in — a
+    /// breath after the last change in a burst. The first notice a
+    /// ResizeObserver gives is of the sizes as they are, not a change. In
+    /// the app's own world, so the page sees nothing of it.
+    static let changed = """
+    return new Promise((done) => {
       const d = document.documentElement;
-      if (!d) return null;
-      if (key === "height") return d.scrollHeight;
-      const own = d.getBoundingClientRect().width;
-      if (own > innerWidth + 1) return own;
-      const saved = d.getAttribute("style");
-      d.style.setProperty("width", "min-content", "important");
-      const narrowest = d.getBoundingClientRect().width;
-      saved === null ? d.removeAttribute("style") : d.setAttribute("style", saved);
-      return narrowest >= 100 ? narrowest : Math.max(narrowest, d.scrollWidth);
-    })
+      if (!d || typeof ResizeObserver !== "function") return;
+      let timer = null, primed = false;
+      const o = new ResizeObserver(() => {
+        if (!primed) { primed = true; return; }
+        clearTimeout(timer);
+        timer = setTimeout(() => { o.disconnect(); done(true); }, 60);
+      });
+      o.observe(d);
+      if (document.body) { o.observe(document.body); if (document.body.firstElementChild) o.observe(document.body.firstElementChild); }
+    });
     """
+
+    /// Which watch is current: a page the popup goes on to (a load after
+    /// the first) starts a new one, and the old one's word is let go.
+    private var watching = 0
+
+    /// Waits for the page to change size, measures, and waits again.
+    private func watch() {
+        guard let web else { return }
+        watching += 1
+        let token = watching
+        web.callAsyncJavaScript(ExtensionPopup.changed, arguments: [:], in: nil, in: .defaultClient) { [weak self] result in
+            MainActor.assumeIsolated {
+                guard let self, web === self.web, token == self.watching, (try? result.get()) != nil else { return }
+                self.grow()
+                self.watch()
+            }
+        }
+    }
 
     /// Measured again as the page builds itself, the way Chrome measures on
     /// each layout: for its first two seconds the popup follows it either
     /// way, after that it only grows — so a page that settles doesn't set
     /// it rocking.
-    private var ticks = 0
     private func grow() {
+        guard let measured else { return firstMeasure() }
         guard shown, let web, let popover else { return }
-        ticks += 1
-        if ticks <= 8 {
-            web.evaluateJavaScript("(\(ExtensionPopup.preferred))()") { [weak self] value, _ in
-                MainActor.assumeIsolated {
-                    guard let self, let pair = value as? [Double], pair.count == 2 else { return }
-                    let wanted = NSSize(width: pair[0], height: pair[1])
-                    let now = popover.contentSize
-                    if abs(wanted.width - now.width) > 2 || abs(wanted.height - now.height) > 2 { self.apply(wanted) }
-                }
-            }
-            return
-        }
-        web.evaluateJavaScript("[\(ExtensionPopup.reach)('width'), (() => { const d = document.documentElement; return d && d.scrollHeight > d.clientHeight ? d.scrollHeight : 0; })()]") { value, _ in
+        web.evaluateJavaScript("(\(ExtensionPopup.preferred))()") { [weak self] value, _ in
             MainActor.assumeIsolated {
-                guard let pair = value as? [Double], pair.count == 2 else { return }
+                guard let self, web === self.web, let pair = value as? [Double], pair.count == 2 else { return }
                 let now = popover.contentSize
-                let wanted = NSSize(width: min(800, max(now.width, pair[0])), height: min(600, max(now.height, pair[1])))
-                if wanted != now { self.apply(wanted) }
+                var wanted = NSSize(width: pair[0], height: pair[1])
+                if Date().timeIntervalSince(measured) > 2 {
+                    wanted = NSSize(width: max(now.width, wanted.width), height: max(now.height, wanted.height))
+                }
+                self.apply(wanted)
             }
         }
     }
@@ -324,8 +321,6 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// its notification can land after the next one has opened.
     func popoverDidClose(_ notification: Notification) {
         guard (notification.object as? NSPopover) === popover else { return }
-        measuring?.invalidate()
-        measuring = nil
         forget()
     }
 }
