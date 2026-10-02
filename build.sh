@@ -134,9 +134,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 
 # Signing. A Developer ID certificate, when there is one, with the hardened
-# runtime Gatekeeper insists on for anything notarised; otherwise ad-hoc,
-# which is enough for the app to run on the machine that built it — and
-# which the updater refuses to swap anything in under.
+# runtime Gatekeeper insists on for anything notarised; otherwise a local
+# signature, which is enough for the app to run on the machine that built it.
 IDENTITY="${BROWSER_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
   | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"' || true)}"
 # Passkeys need an entitlement Apple grants to browsers on request, and a
@@ -155,7 +154,17 @@ if [ -n "$IDENTITY" ]; then
     --sign "$IDENTITY" "$APP"
   echo "signed as: $IDENTITY"
 else
-  codesign --force --deep --sign - "$APP" 2>/dev/null || true
+  # No Developer ID: an Apple Development certificate, if there is one, so
+  # the app is the same app from build to build. Ad-hoc, its only identity is
+  # the hash of the binary, and the keychain asks again for every saved
+  # password after every rebuild. Still not a build to hand to anyone.
+  LOCAL="$(security find-identity -v -p codesigning 2>/dev/null \
+    | grep -o '"Apple Development: [^"]*"' | head -1 | tr -d '"' || true)"
+  if [ -n "$LOCAL" ] && codesign --force --deep --sign "$LOCAL" "$APP" 2>/dev/null; then
+    echo "signed as: $LOCAL"
+  else
+    codesign --force --deep --sign - "$APP" 2>/dev/null || true
+  fi
   [ "$STEP" != "app" ] && echo "no Developer ID certificate found — the DMG will only open on this Mac" >&2
 fi
 
