@@ -102,7 +102,7 @@ struct ExtensionsPage: View {
             let context = extensions.contexts[item.id]
             HStack(spacing: 12) {
                 Group {
-                    if let icon = context?.webExtension.icon(for: CGSize(width: 32, height: 32)) {
+                    if let icon = extensions.icon(for: item.id, size: 32) {
                         Image(nsImage: icon).resizable().interpolation(.high)
                     } else {
                         Image(systemName: "puzzlepiece.extension").foregroundStyle(Palette.muted)

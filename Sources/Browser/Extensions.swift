@@ -177,6 +177,7 @@ final class Extensions: NSObject, ObservableObject {
             if let adapter = adapters[id] { controller.didCloseTab(adapter, windowIsClosing: false) }
             adapters[id] = nil
             watching[id] = nil
+            forgetIcons(in: id)
         }
         for tab in now where !order.contains(tab.id) {
             controller.didOpenTab(adapter(for: tab))
@@ -243,6 +244,7 @@ final class Extensions: NSObject, ObservableObject {
             if contexts[item.id] == nil, loadsThisRun.contains(item.id) { loadedBefore.insert(item.id) }
             loadsThisRun.insert(item.id)
             contexts[item.id] = context
+            forgetIcons(of: item.id)
             actionsChanged += 1
             return true
         } catch {
@@ -255,6 +257,7 @@ final class Extensions: NSObject, ObservableObject {
         guard let context = contexts[id] else { return }
         try? controller.unload(context)
         contexts[id] = nil
+        forgetIcons(of: id)
         actionsChanged += 1
     }
 
@@ -700,7 +703,7 @@ final class Extensions: NSObject, ObservableObject {
 
     // MARK: - the buttons
 
-    struct Button: Identifiable {
+    struct Button: Identifiable, Equatable {
         let id: String
         let name: String
         let label: String
@@ -708,6 +711,45 @@ final class Extensions: NSObject, ObservableObject {
         let badge: String
         let enabled: Bool
         let pinned: Bool
+
+        /// The same button to look at. Icons come from the cache below, so
+        /// the same icon is the same object, and a changed one a new one.
+        static func == (a: Button, b: Button) -> Bool {
+            a.id == b.id && a.label == b.label && a.badge == b.badge && a.enabled == b.enabled && a.pinned == b.pinned && a.icon === b.icon
+        }
+    }
+
+    /// Icons, rasterized once. WebKit draws an icon afresh on every
+    /// `icon(for:)`, and `buttons` is read on every pass over the row and
+    /// the list — every tab switch, every hover. Keyed by extension, the tab
+    /// whose action it is, and size; an extension's go when its action
+    /// changes or it unloads, a tab's when the tab closes (2 Oct 2026).
+    private var icons: [String: NSImage] = [:]
+
+    private func icon(of action: WKWebExtension.Action, for id: String, in tab: Tab.ID?, size: CGFloat) -> NSImage? {
+        let key = "\(id)/\(tab?.uuidString ?? "-")/\(Int(size))"
+        if let hit = icons[key] { return hit }
+        let made = action.icon(for: CGSize(width: size, height: size))
+        if let made { icons[key] = made }
+        return made
+    }
+
+    /// The extension's own icon, as Settings shows it.
+    func icon(for id: String, size: CGFloat) -> NSImage? {
+        let key = "\(id)/x/\(Int(size))"
+        if let hit = icons[key] { return hit }
+        let made = contexts[id]?.webExtension.icon(for: CGSize(width: size, height: size))
+        if let made { icons[key] = made }
+        return made
+    }
+
+    private func forgetIcons(of id: String) {
+        icons = icons.filter { !$0.key.hasPrefix(id + "/") }
+    }
+
+    private func forgetIcons(in tab: Tab.ID) {
+        let mark = "/\(tab.uuidString)/"
+        icons = icons.filter { !$0.key.contains(mark) }
     }
 
     /// The list behind the puzzle button.
@@ -725,7 +767,7 @@ final class Extensions: NSObject, ObservableObject {
                 id: item.id,
                 name: item.name,
                 label: action.label.isEmpty ? item.name : action.label,
-                icon: action.icon(for: CGSize(width: 16, height: 16)),
+                icon: icon(of: action, for: item.id, in: tab?.tab?.id, size: 16),
                 badge: action.badgeText,
                 enabled: action.isEnabled,
                 pinned: item.pinned ?? false
@@ -835,6 +877,7 @@ extension Extensions: WKWebExtensionControllerDelegate {
     }
 
     func webExtensionController(_ controller: WKWebExtensionController, didUpdate action: WKWebExtension.Action, forExtensionContext context: WKWebExtensionContext) {
+        forgetIcons(of: context.uniqueIdentifier)
         actionsChanged += 1
     }
 
@@ -1012,6 +1055,7 @@ private struct ExtensionButtons: View {
                 // rest are still in the list behind the puzzle (2 Oct 2026).
                 ForEach(extensions.buttons.filter(\.pinned).prefix(ExtensionButtons.pinsShown)) { button in
                     ActionButton(button: button) { extensions.press(button.id) }
+                        .equatable()
                         .background(Anchor(id: button.id))
                         .contextMenu { ExtensionActions(id: button.id, name: button.name, extensions: extensions) }
                 }
@@ -1026,10 +1070,14 @@ private struct ExtensionButtons: View {
         }
     }
 
-    private struct ActionButton: View {
+    /// Drawn again only when its button changes (see Button ==), not on
+    /// every pass over the row.
+    private struct ActionButton: View, Equatable {
         let button: Extensions.Button
         let press: () -> Void
         @State private var hovering = false
+
+        static func == (a: ActionButton, b: ActionButton) -> Bool { a.button == b.button }
 
         var body: some View {
             SwiftUI.Button(action: press) {
