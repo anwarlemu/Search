@@ -207,15 +207,31 @@ final class History: ObservableObject {
             best.insert((row, score), at: at)
             if best.count > limit { best.removeLast() }
         }
+        // How often you go there comes first, how well the letters match
+        // second: a page you open every day beats a one-off that happens to
+        // start with what was typed (3 Oct 2026). Recency only tempers the
+        // count, so a habit from last month still counts for half.
+        func weight(_ visit: Visit) -> Double {
+            let days = max(0, now.timeIntervalSince(visit.last) / 86_400)
+            return Double(visit.count) * (0.5 + 0.5 * exp(-days / 30))
+        }
         for entry in indexed {
+            // A search you have made before, offered by its words: the row
+            // goes back to the same results, and the count is how often.
+            if let asked = Google.query(of: entry.trace.url) {
+                guard let rank = rank(asked.lowercased(), against: needle) else { continue }
+                offer(Suggestion(key: asked, title: Google.name, url: entry.trace.url, kind: .search),
+                    weight(entry.visit) + rank / 4)
+                continue
+            }
             guard let rank = rank(entry.address, against: needle) else { continue }
             offer(Suggestion(key: entry.trace.label, title: entry.trace.title, url: entry.trace.url, kind: .visited),
-                rank + 4 + frecency(entry.visit, now: now) + (entry.address.contains("/") ? 0 : 1.5))
+                weight(entry.visit) + rank / 4 + (entry.address.contains("/") ? 0 : 0.25))
         }
         for known in History.known {
             guard let url = URL(string: "https://" + known.0 + "/"), visits[Address.identity(url)] == nil,
                   let rank = rank(known.0, against: needle) else { continue }
-            offer(Suggestion(key: known.0, title: known.1, url: url, kind: .known), rank)
+            offer(Suggestion(key: known.0, title: known.1, url: url, kind: .known), rank / 4)
         }
         return best.map(\.row)
     }

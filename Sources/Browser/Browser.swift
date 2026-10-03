@@ -1897,6 +1897,7 @@ final class Browser: NSObject, ObservableObject {
         // Last in the list, and only when what was typed cannot be a place.
         if !typed.isEmpty,
            Address.url(from: typed) == nil,
+           !list.contains(where: { $0.kind == .search && $0.key.lowercased() == typed.lowercased() }),
            let asked = Google.url(for: typed) {
             list.append(
                 Suggestion(key: typed, title: Google.name, url: asked, kind: .search)

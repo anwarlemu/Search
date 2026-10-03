@@ -26,4 +26,14 @@ enum Google {
         }
         return URL(string: "https://www.google.com/search?q=" + escaped)
     }
+
+    /// The words a results page was asked for, when the address is one.
+    static func query(of url: URL) -> String? {
+        guard let host = url.host()?.lowercased(), host == "google.com" || host.hasSuffix(".google.com") || host.hasPrefix("google."),
+              url.path() == "/search",
+              let q = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "q" })?.value,
+              !q.trimmingCharacters(in: .whitespaces).isEmpty
+        else { return nil }
+        return q
+    }
 }
