@@ -10,14 +10,13 @@ struct SettingsPanel: View {
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
 
-    @ObservedObject private var updater = Updater.shared
     @ObservedObject private var shield = Shield.shared
     @ObservedObject private var me = Me.shared
     @State private var isDefault = Links.isDefault
     @State private var page: Page = Page(rawValue: Store.settings.string(forKey: "settings.page") ?? "") ?? .general
 
     enum Page: String, CaseIterable, Identifiable {
-        case general, tabs, keys, extensions, passwords, you, downloads, privacy, about
+        case general, tabs, keys, extensions, passwords, you, downloads, privacy
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -29,7 +28,6 @@ struct SettingsPanel: View {
             case .you: return "You"
             case .downloads: return "Downloads"
             case .privacy: return "Privacy"
-            case .about: return "About"
             }
         }
         var icon: String {
@@ -42,7 +40,6 @@ struct SettingsPanel: View {
             case .you: return "person.text.rectangle"
             case .downloads: return "arrow.down.circle"
             case .privacy: return "hand.raised"
-            case .about: return "info.circle"
             }
         }
     }
@@ -146,7 +143,6 @@ struct SettingsPanel: View {
                     case .you: you
                     case .downloads: downloads
                     case .privacy: privacy
-                    case .about: about
                     }
                 }
                 .padding(.bottom, 4)
@@ -464,87 +460,6 @@ struct SettingsPanel: View {
                 Line("Cache", "Only what was fetched to draw pages") {
                     Pill("Clear") { browser.clearCache() }
                 }
-            }
-        }
-    }
-
-    // MARK: - about
-
-    private var about: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 14) {
-                Logomark()
-                    .fill(Palette.ink, style: FillStyle(eoFill: true))
-                    .aspectRatio(Logomark.canvas.width / Logomark.canvas.height, contentMode: .fit)
-                    .frame(height: 34)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Browser")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Palette.ink)
-                    Text("by Office Commun · version \(Updater.version)")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.muted)
-                }
-            }
-            .padding(.bottom, 2)
-
-            Card {
-                Line(versionTitle, versionDetail) { versionControl }
-                Rule()
-                Line("Found something wrong?", "Opens a draft with the version already in it") {
-                    Pill("Send Feedback") { Links.writeFeedback() }
-                }
-            }
-        }
-    }
-
-    /// The version line follows the newer build from found to fetched to
-    /// in place; with none, it is simply this one.
-    private var versionTitle: String {
-        switch updater.stage {
-        case .none: return "Updates"
-        case .fetching(let next): return "Browser \(next.version) is downloading…"
-        case .ready(let next): return "Browser \(next.version) is ready"
-        case .offered(let next): return "Browser \(next.version) is out"
-        }
-    }
-
-    private var versionDetail: String {
-        switch updater.stage {
-        case .none:
-            return updater.lastChecked.map { "Checked \($0.formatted(.relative(presentation: .named))) — once a day on its own" }
-                ?? "Checked once a day on its own"
-        case .fetching(let next):
-            return next.notes ?? "Quietly, in the background — nothing you have set is touched"
-        case .ready(let next):
-            return next.notes ?? "It's there the next time you open Browser"
-        case .offered(let next):
-            return next.notes ?? "Open the disk image, the same as the first time"
-        }
-    }
-
-    @ViewBuilder
-    private var versionControl: some View {
-        switch updater.stage {
-        case .none:
-            Pill(updater.checking ? "Checking…" : "Check now") {
-                updater.check { found in
-                    if found == nil { browser.announce("This is the latest one") }
-                }
-            }
-            .disabled(updater.checking)
-        case .fetching:
-            if updater.fetched > 0 {
-                ProgressView(value: updater.fetched).frame(width: 90).tint(Palette.ink)
-            } else {
-                Ring(size: 12)
-            }
-        case .ready:
-            Pill("Relaunch now", filled: true) { updater.relaunch() }
-        case .offered(let next):
-            Pill("Download", filled: true) {
-                browser.tuning = false
-                browser.open(next.dmg, foreground: true)
             }
         }
     }
