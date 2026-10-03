@@ -84,7 +84,6 @@ struct SettingsPanel: View {
         .padding(8)
         .frame(width: SettingsPanel.rail, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Palette.wash.opacity(0.45))
     }
 
     private struct PageRow: View {
@@ -108,8 +107,7 @@ struct SettingsPanel: View {
                 .frame(height: 30)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(on ? Palette.ground : (hovering ? Palette.hover : .clear))
-                        .shadow(color: .black.opacity(on ? 0.06 : 0), radius: 3, y: 1)
+                        .fill(on ? Palette.wash : (hovering ? Palette.hover : .clear))
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
