@@ -106,11 +106,26 @@ extension Browser {
         if tab.loading { return "still loading" }
         if tab.noisy { return "playing sound" }
         if tab.floating || floating == tab.id { return "its video is out" }
+        if Browser.startsOver(tab.address) { return "an app that would start over" }
         if web.cameraCaptureState != .none || web.microphoneCaptureState != .none { return "on a call" }
         if downloading.contains(where: { $0.webView === web }) { return "downloading" }
         // A sign-in window hands its answer back to the page that opened it.
         if active?.opener == tab.id { return "the page on screen came from it" }
         return nil
+    }
+
+    /// Sites that are an app more than a page: put to sleep and rebuilt,
+    /// they don't come back where they were — they start again, syncing
+    /// every chat from the phone, which on WhatsApp is minutes (3 Oct
+    /// 2026). They stay awake, as a pinned tab does.
+    private static let startsOver: [String] = [
+        "web.whatsapp.com", "web.telegram.org", "messages.google.com", "discord.com",
+        "app.slack.com", "teams.microsoft.com", "www.messenger.com", "app.element.io",
+    ]
+
+    static func startsOver(_ url: URL?) -> Bool {
+        guard let host = url?.host()?.lowercased() else { return false }
+        return startsOver.contains { host == $0 || host.hasSuffix("." + $0) }
     }
 
     /// Asks the page whether it holds anything typed, pictures it, then lets
