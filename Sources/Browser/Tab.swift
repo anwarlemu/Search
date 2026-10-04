@@ -109,7 +109,16 @@ final class Tab: ObservableObject, Identifiable {
     }
     /// The web view if there is one yet, for the callers that must not be
     /// the reason there is.
-    private(set) var built: PageView?
+    private(set) var built: PageView? {
+        // The stage holds whichever view it was last handed, and puts that
+        // one right on every layout. A page let go and built again — after
+        // its process died, after a reload of a hollow tab — left it holding
+        // the dead one: a white page that no scroll or click would mend
+        // (4 Oct 2026). Letting go is said out loud, so the stage asks again
+        // and is handed the new view; building is not, since it happens
+        // while the stage is asking.
+        didSet { if built == nil, oldValue != nil { stage.objectWillChange.send() } }
+    }
     /// Made when the page is first built, not when the tab is: a session
     /// of thirty tabs across several profiles came back with thirty of
     /// these before the window had drawn once.
