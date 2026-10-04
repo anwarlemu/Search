@@ -262,7 +262,7 @@ final class Tab: ObservableObject, Identifiable {
     /// Right-click landed on an image. WebKit's own menu offers to copy or
     /// download it and then, on at least some sites, does neither — see
     /// ImageMenu.swift for why this is built rather than patched.
-    var onImageMenu: ((Tab, URL) -> Void)?
+    var onImageMenu: ((Tab, URL, URL?) -> Void)?
     /// "Add to Search" was pressed on the Chrome Web Store page this tab shows.
     var onStoreAdd: ((Tab) -> Void)?
     /// A page asking to send notifications; a page sending one — the site,

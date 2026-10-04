@@ -265,7 +265,7 @@ extension Browser: WKDownloadDelegate {
         announce("Download failed — open Downloads to retry")
     }
 
-    private func freeDownloadName(_ name: String, in folder: URL) -> URL {
+    func freeDownloadName(_ name: String, in folder: URL) -> URL {
         let stem = (name as NSString).deletingPathExtension
         let ext = (name as NSString).pathExtension
         let reserved = Set(transfers.filter(\.active).compactMap(\.destination))

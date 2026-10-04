@@ -37,11 +37,24 @@ final class ImageRelay: NSObject, WKScriptMessageHandler {
         var el = e.target;
         while (el && el.tagName !== 'IMG') el = el.parentElement;
         if (!el || !el.currentSrc || el.naturalWidth < 2) return;
-        // A picture that is a link is a link first: WebKit's own menu has
-        // Open in New Tab and Copy Link, and this one has neither (2 Oct 2026).
-        if (el.closest('a[href]')) return;
         e.preventDefault();
-        window.webkit.messageHandlers.officeImages.postMessage({ src: el.currentSrc });
+        // A picture that is a link gets the link's two items as well — handed
+        // back to WebKit's menu instead, its Download Image did nothing,
+        // which on Google Images is every picture (4 Oct 2026). A blob: is
+        // the page's alone, so the page reads it out as data first.
+        var link = el.closest('a[href]');
+        var href = link ? link.href : '';
+        var src = el.currentSrc;
+        var send = function (s) { window.webkit.messageHandlers.officeImages.postMessage({ src: s, link: href }); };
+        if (src.indexOf('blob:') === 0) {
+          fetch(src).then(function (r) { return r.blob(); }).then(function (b) {
+            var reader = new FileReader();
+            reader.onload = function () { send(reader.result); };
+            reader.readAsDataURL(b);
+          }).catch(function () { send(src); });
+        } else {
+          send(src);
+        }
       }, true);
     })();
     """
@@ -54,9 +67,10 @@ final class ImageRelay: NSObject, WKScriptMessageHandler {
               let src = body["src"] as? String,
               let url = URL(string: src)
         else { return }
+        let link = (body["link"] as? String).flatMap { $0.isEmpty ? nil : URL(string: $0) }
         MainActor.assumeIsolated { [weak self] in
             guard let self, let tab else { return }
-            tab.onImageMenu?(tab, url)
+            tab.onImageMenu?(tab, url, link)
         }
     }
 }
@@ -65,10 +79,20 @@ extension Browser {
     /// The menu itself, popped where the pointer already is — the click that
     /// asked for this one happened a moment ago, in JavaScript, with no
     /// native event left to hang an NSMenu off of.
-    func showImageMenu(for tab: Tab, at url: URL) {
+    func showImageMenu(for tab: Tab, at url: URL, link: URL? = nil) {
         guard let webView = tab.built else { return }
         let menu = NSMenu()
         menu.autoenablesItems = false
+        if let link {
+            menu.addItem(ImageMenuItem("Open Link in New Tab") { [weak self] in
+                self?.open(link, foreground: true)
+            })
+            menu.addItem(ImageMenuItem("Copy Link Address") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(link.absoluteString, forType: .string)
+            })
+            menu.addItem(.separator())
+        }
         menu.addItem(ImageMenuItem("Open Image in New Tab") { [weak self] in
             self?.open(url, foreground: true)
         })
@@ -126,10 +150,59 @@ extension Browser {
     /// The same WKDownload this app already knows how to finish — asked for
     /// directly, since a context menu's "Download Image" never reaches
     /// WKNavigationDelegate to ask for one on its own.
+    ///
+    /// A picture the page carries inline — data:, as Google Images' thumbnails
+    /// are — is written straight to the downloads folder; there is nothing
+    /// to fetch.
     func downloadImage(at url: URL, from webView: WKWebView) {
-        webView.startDownload(using: URLRequest(url: url)) { [weak self] download in
+        if url.scheme == "data" {
+            guard let (data, ext) = Browser.inline(url) else { return announce("Couldn't save that image") }
+            let file = freeDownloadName("image." + ext, in: prefs.downloads)
+            do {
+                try FileManager.default.createDirectory(at: prefs.downloads, withIntermediateDirectories: true)
+                try data.write(to: file)
+            } catch {
+                return announce("Couldn't save that image")
+            }
+            if !isPrivate { loot.add(Keep(name: file.lastPathComponent, from: active?.address?.host() ?? "", path: file.path, date: Date())) }
+            announce("Saved \(file.lastPathComponent)")
+            return
+        }
+        var request = URLRequest(url: url)
+        if let page = active?.address { request.setValue(page.absoluteString, forHTTPHeaderField: "Referer") }
+        webView.startDownload(using: request) { [weak self] download in
             self?.keep(download)
         }
+    }
+
+    /// The bytes and a file extension out of a data: address, or nil for
+    /// one that isn't a picture.
+    private static func inline(_ url: URL) -> (Data, String)? {
+        let text = url.absoluteString
+        guard let comma = text.firstIndex(of: ",") else { return nil }
+        let head = text[text.index(text.startIndex, offsetBy: 5)..<comma].lowercased()
+        let body = String(text[text.index(after: comma)...])
+        let data: Data?
+        if head.hasSuffix(";base64") {
+            data = Data(base64Encoded: body, options: .ignoreUnknownCharacters)
+        } else {
+            data = body.removingPercentEncoding?.data(using: .utf8)
+        }
+        guard let data, !data.isEmpty else { return nil }
+        let mime = head.split(separator: ";").first.map(String.init) ?? ""
+        let ext: String
+        switch mime {
+        case "image/jpeg", "image/jpg": ext = "jpg"
+        case "image/png": ext = "png"
+        case "image/gif": ext = "gif"
+        case "image/webp": ext = "webp"
+        case "image/svg+xml": ext = "svg"
+        case "image/avif": ext = "avif"
+        case "image/bmp": ext = "bmp"
+        case "image/tiff": ext = "tiff"
+        default: ext = mime.hasPrefix("image/") ? String(mime.dropFirst(6)) : "png"
+        }
+        return (data, ext)
     }
 }
 

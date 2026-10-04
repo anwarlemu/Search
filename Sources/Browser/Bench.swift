@@ -20,6 +20,9 @@ import WebKit
 
 @MainActor
 final class Bench {
+    /// A running number for the mouse events the bench posts.
+    nonisolated(unsafe) static var eventNumber = 1_000
+
     static let shared = Bench()
     private var awake: NSObjectProtocol?
 
@@ -511,11 +514,15 @@ final class Bench {
             else { answer(["error": "mouse needs a path of [x, y] points"]); return }
             let clicks = max(0, request["clicks"] as? Int ?? 1)
             let flags = Bench.flags(request["mods"] as? String)
+            // Each event numbered, as the system numbers them: WebKit pairs a
+            // press with its release by number, and a run of noughts made no
+            // click on a page at all (3 Oct 2026).
             func post(_ type: NSEvent.EventType, _ p: [Double], count: Int) {
+                Bench.eventNumber += 1
                 guard let event = NSEvent.mouseEvent(
                     with: type, location: NSPoint(x: p[0], y: window.frame.height - p[1]), modifierFlags: flags,
                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                    context: nil, eventNumber: 0, clickCount: count, pressure: 1
+                    context: nil, eventNumber: Bench.eventNumber, clickCount: count, pressure: 1
                 ) else { return }
                 NSApp.postEvent(event, atStart: false)
             }
