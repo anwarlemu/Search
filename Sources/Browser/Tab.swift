@@ -75,6 +75,13 @@ enum Web {
         // the view) only lets Safari's Develop menu in; the item itself waits
         // on this older switch, which has no public name.
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        // The system's own picture-in-picture window for a video. Off by
+        // default in a WKWebView on the Mac, and a page's call to it was
+        // refused without a word; the switch has no public name here
+        // either (5 Oct 2026).
+        if config.preferences.responds(to: NSSelectorFromString("_setAllowsPictureInPictureMediaPlayback:")) {
+            config.preferences.setValue(true, forKey: "allowsPictureInPictureMediaPlayback")
+        }
         // A test run may let sound start on its own, so the bench can play a
         // video the way a click would.
         config.mediaTypesRequiringUserActionForPlayback = Store.testing && ProcessInfo.processInfo.environment["BROWSER_AUTOPLAY"] != nil ? [] : .audio
@@ -272,6 +279,9 @@ final class Tab: ObservableObject, Identifiable {
     /// download it and then, on at least some sites, does neither — see
     /// ImageMenu.swift for why this is built rather than patched.
     var onImageMenu: ((Tab, URL, URL?) -> Void)?
+    /// The video's system window changed: its mode now, and whether the
+    /// video was left paused.
+    var onPip: ((Tab, String, Bool) -> Void)?
     /// "Add to Search" was pressed on the Chrome Web Store page this tab shows.
     var onStoreAdd: ((Tab) -> Void)?
     /// A page asking to send notifications; a page sending one — the site,
@@ -286,6 +296,7 @@ final class Tab: ObservableObject, Identifiable {
     private let veils_ = VeilRelay()
     private let forms = FormRelay()
     private let images = ImageRelay()
+    private let pip = PipRelay()
     private let shop = StoreRelay()
     private let bell = NotifyRelay()
     private let links = LinkRelay()
@@ -435,6 +446,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.removeScriptMessageHandler(forName: VeilRelay.name)
         controller.removeScriptMessageHandler(forName: FormRelay.name)
         controller.removeScriptMessageHandler(forName: ImageRelay.name)
+        controller.removeScriptMessageHandler(forName: PipRelay.name)
         controller.removeScriptMessageHandler(forName: StoreRelay.name)
         controller.removeScriptMessageHandler(forName: NotifyRelay.name)
         controller.removeScriptMessageHandler(forName: LinkRelay.name)
@@ -443,6 +455,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.add(relay, name: ScrollRelay.name)
         controller.add(veils_, name: VeilRelay.name)
         controller.add(images, name: ImageRelay.name)
+        controller.add(pip, name: PipRelay.name)
         controller.add(shop, name: StoreRelay.name)
         controller.add(forms, name: FormRelay.name)
         Shield.shared.protect(controller)
@@ -485,6 +498,7 @@ final class Tab: ObservableObject, Identifiable {
         veils_.tab = self
         forms.tab = self
         images.tab = self
+        pip.tab = self
         shop.tab = self
         bell.tab = self
         links.tab = self
@@ -1127,6 +1141,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.removeScriptMessageHandler(forName: VeilRelay.name)
         controller.removeScriptMessageHandler(forName: FormRelay.name)
         controller.removeScriptMessageHandler(forName: ImageRelay.name)
+        controller.removeScriptMessageHandler(forName: PipRelay.name)
         controller.removeScriptMessageHandler(forName: StoreRelay.name)
         controller.removeScriptMessageHandler(forName: NotifyRelay.name)
         controller.removeScriptMessageHandler(forName: LinkRelay.name)

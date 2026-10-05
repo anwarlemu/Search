@@ -63,6 +63,10 @@ final class Browser: NSObject, ObservableObject {
     /// The tab whose page is currently out in the little window. Nothing
     /// floating means no window: the two are checked against each other rather
     /// than trusted to stay in step.
+    /// The tab whose video is out in the system's own picture-in-picture
+    /// window. The page stays in its tab; only the video is elsewhere.
+    @Published private(set) var piped: Tab.ID?
+
     @Published private(set) var floating: Tab.ID? {
         didSet {
             guard floating == nil, floater.showing else { return }
@@ -102,6 +106,7 @@ final class Browser: NSObject, ObservableObject {
         let going = tabs.filter { ids.contains($0.id) }
         guard !going.isEmpty else { return }
         if let id = floating, ids.contains(id) { land() }
+        if let id = piped, ids.contains(id), let out = tab(id) { unpip(out) }
         if let active, ids.contains(active.id) {
             let staying = tabs.enumerated().filter { !ids.contains($0.element.id) }
             let last = tabs.lastIndex { ids.contains($0.id) } ?? 0
@@ -1343,6 +1348,7 @@ final class Browser: NSObject, ObservableObject {
         // Coming back to the tab whose video is out brings it home first, so
         // it is never lifted and landed in the same breath.
         if floating == tab.id { land() }
+        if piped == tab.id { unpip(tab) }
         leaving()
         activeID = tab.id
         if walk == nil { tab.touch() }
@@ -1372,6 +1378,7 @@ final class Browser: NSObject, ObservableObject {
         // it. Left alone, the window would go on holding a page belonging to a
         // tab that no longer exists.
         if floating == tab.id { land() }
+        if piped == tab.id { unpip(tab) }
 
         // A pinned tab is not closed by ⌘W — it is put down. The letter keeps
         // its place, the page is let go, and you land on whatever you were
@@ -1668,6 +1675,10 @@ final class Browser: NSObject, ObservableObject {
 
     /// ⌘⇧P, for lifting one out by hand.
     func toggleFloat() {
+        if let id = piped, let out = tab(id) {
+            unpip(out)
+            return
+        }
         if floater.showing {
             land()
             return
@@ -1675,12 +1686,31 @@ final class Browser: NSObject, ObservableObject {
         lift(active, quietly: false)
     }
 
+    /// The video back in its page. Said before the page is told, so the
+    /// change the page then reports is known to be ours.
+    func unpip(_ tab: Tab) {
+        if piped == tab.id { piped = nil }
+        tab.built?.evaluateJavaScript(Isolate.unpip)
+    }
+
+    /// The page says its video's system window changed. Back inline while
+    /// still playing is the window's "return to tab" button: the tab comes
+    /// to the front, as the page-float's own button brings it. Back inline
+    /// and paused is its ×, and nothing more is wanted.
+    private func pipChanged(_ tab: Tab, mode: String, paused: Bool) {
+        guard mode != "picture-in-picture", piped == tab.id else { return }
+        piped = nil
+        guard !paused else { return }
+        reveal(tab)
+        if let home = window ?? Links.window { Browser.bringForward(home) }
+    }
+
     /// Everything but the video goes out of the way, and the page it lives in
     /// moves house — into a small window that stays above everything.
     private func lift(_ tab: Tab?, quietly: Bool) {
         // A tab just put down with ⌘W has no page to lift a video out of, and
         // asking it would only build an empty view to ask.
-        guard let tab, !tab.isBlank, !tab.asleep, !floater.showing else { return }
+        guard let tab, !tab.isBlank, !tab.asleep, !floater.showing, piped == nil else { return }
         // On its own: from a site whose video is the point of the site, from a
         // call — Meet, Zoom, Teams, anything using the camera or microphone —
         // and elsewhere only for a video playing with its sound on and big
@@ -1690,6 +1720,32 @@ final class Browser: NSObject, ObservableObject {
         let web = tab.web
         let calling = web.cameraCaptureState != .none || web.microphoneCaptureState != .none
         let choosy = quietly && !calling && !Players.knows(tab.address)
+        // The system's own window first (5 Oct 2026). A video it won't
+        // take goes the old way: the page itself, into the little window.
+        tab.web.evaluateJavaScript(Isolate.pip(choosy: choosy)) { [weak self] answer, _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                switch answer as? String {
+                case "native":
+                    guard tab.built != nil, !tab.asleep, self.piped == nil, !self.floater.showing,
+                          !(quietly && tab.id == self.activeID)
+                    else {
+                        tab.built?.evaluateJavaScript(Isolate.unpip)
+                        return
+                    }
+                    self.piped = tab.id
+                case "unsupported":
+                    self.float(tab, choosy: choosy, quietly: quietly)
+                default:
+                    if !quietly { self.announce("Nothing is playing here") }
+                }
+            }
+        }
+    }
+
+    /// The page itself into the little window — for a video the system's
+    /// picture-in-picture won't take.
+    private func float(_ tab: Tab, choosy: Bool, quietly: Bool) {
         // Isolated where it is, then moved: pinned only once it was in the
         // little window, the video drew nothing at all (25 Sep 2026).
         tab.web.evaluateJavaScript(Isolate.on(choosy: choosy)) { [weak self] answer, _ in
@@ -1741,6 +1797,7 @@ final class Browser: NSObject, ObservableObject {
         }
         tab.onPickEnd = { [weak self] _ in self?.veiling = false }
         tab.onImageMenu = { [weak self] tab, url, link in self?.showImageMenu(for: tab, at: url, link: link) }
+        tab.onPip = { [weak self] tab, mode, paused in self?.pipChanged(tab, mode: mode, paused: paused) }
         tab.onNotifyAsk = { [weak self] tab, host in self?.notifyAsked(tab, host: host) }
         tab.onNotify = { [weak self] tab, host, title, body, tag in
             self?.notifyShow(tab, host: host, title: title, body: body, tag: tag)

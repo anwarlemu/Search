@@ -105,7 +105,7 @@ extension Browser {
         guard let web = tab.built else { return "no page" }
         if tab.loading { return "still loading" }
         if tab.noisy { return "playing sound" }
-        if tab.floating || floating == tab.id { return "its video is out" }
+        if tab.floating || floating == tab.id || piped == tab.id { return "its video is out" }
         if Browser.startsOver(tab.address) { return "an app that would start over" }
         if web.cameraCaptureState != .none || web.microphoneCaptureState != .none { return "on a call" }
         if downloading.contains(where: { $0.webView === web }) { return "downloading" }

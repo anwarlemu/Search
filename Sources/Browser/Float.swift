@@ -784,7 +784,68 @@ private final class Panel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+/// The page says when its video's system window changes: back inline by
+/// the window's own "return to tab" button, or closed by its ×.
+final class PipRelay: NSObject, WKScriptMessageHandler {
+    static let name = "officePip"
+    weak var tab: Tab?
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let body = message.body as? [String: Any], let mode = body["mode"] as? String else { return }
+        let paused = body["paused"] as? Bool ?? false
+        MainActor.assumeIsolated { [weak self] in
+            guard let self, let tab else { return }
+            tab.onPip?(tab, mode, paused)
+        }
+    }
+}
+
 enum Isolate {
+    /// The system's own picture-in-picture window for the video playing
+    /// here — the Mac's, with its controls, on every desktop. Answers
+    /// "native" once asked, "unsupported" for a video the system won't
+    /// take (the page-float stands in then), "none" with nothing playing.
+    /// `choosy` as for `on`.
+    static func pip(choosy: Bool) -> String {
+        """
+        (function (choosy) {
+          var videos = document.querySelectorAll('video');
+          var best = null, area = 0;
+          for (var i = 0; i < videos.length; i++) {
+            var v = videos[i];
+            if (v.paused || v.ended || v.readyState < 2) continue;
+            var box = v.getBoundingClientRect();
+            if (choosy && (v.muted || v.volume === 0 || box.width < 200 || box.height < 112)) continue;
+            if (box.width * box.height >= area) { area = box.width * box.height; best = v; }
+          }
+          if (!best) return 'none';
+          if (!best.webkitSupportsPresentationMode || !best.webkitSupportsPresentationMode('picture-in-picture')) return 'unsupported';
+          var old = document.querySelector('[data-office-pip]');
+          if (old && old !== best) old.removeAttribute('data-office-pip');
+          best.setAttribute('data-office-pip', '');
+          if (!best.__officePip) {
+            best.__officePip = true;
+            best.addEventListener('webkitpresentationmodechanged', function () {
+              try { window.webkit.messageHandlers.officePip.postMessage({ mode: best.webkitPresentationMode, paused: best.paused }); } catch (e) {}
+            });
+          }
+          try { best.webkitSetPresentationMode('picture-in-picture'); } catch (e) { return 'unsupported'; }
+          return 'native';
+        })(\(choosy));
+        """
+    }
+
+    /// The video back in its page, out of the system's window.
+    static let unpip = """
+    (function () {
+      var v = document.querySelector('[data-office-pip]');
+      if (!v) return 'none';
+      v.removeAttribute('data-office-pip');
+      try { if (v.webkitPresentationMode === 'picture-in-picture') v.webkitSetPresentationMode('inline'); } catch (e) {}
+      return 'inline';
+    })();
+    """
+
     /// Everything but the video, out of the way. Visibility is inherited, so
     /// hiding the body and turning it back on for the video alone leaves the
     /// player's own machinery running untouched — which is what keeps the
