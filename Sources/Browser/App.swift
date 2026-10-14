@@ -947,6 +947,14 @@ struct ContentView: View {
             browser.undoHiding()
             return true
         }
+        // ⌘M is the Mac's, never the page's: a page that keeps the key, or
+        // a moment with no key window, left the menu's Minimize unreached.
+        // Answered here as Safari does, unless you gave ⌘M a job (14 Oct 2026).
+        if chord == Chord(key: "m", command: true), !ours(chord), let own = browser.window,
+           !own.styleMask.contains(.fullScreen) {
+            own.miniaturize(nil)
+            return true
+        }
         if let command = browser.keys.command(for: chord) {
             // The page's first, as in Chrome: ⌘K in Slack, ⌘F in Docs. The
             // menu can't be left to it — the menu bar is offered a key before
