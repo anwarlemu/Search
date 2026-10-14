@@ -16,8 +16,11 @@ import WebKit
 // with ⌘W), a tab playing sound, on a call, sending a download, holding its
 // video out in the little window, or holding something typed and not sent.
 //
-// When macOS says memory is short, the half hour shrinks: to five minutes on
-// a warning, to nothing when it is critical.
+// When macOS says memory is short, tabs already past their half hour go at
+// once rather than at the next look; only when it is critical does the wait
+// shrink, and then to ten minutes. A warning used to mean five minutes — and
+// a Mac short of memory for other apps' sake sits at "warning" all day, so
+// every tab left five minutes came back as a reload (14 Oct 2026).
 
 extension Browser {
     /// How long a tab has to go without being looked at. Half an hour, or
@@ -39,7 +42,7 @@ extension Browser {
                 // at the moment there is least room for pictures — is
                 // what it can least afford. They come back white instead.
                 let critical = event.contains(.critical)
-                self.sleepIdle(within: critical ? 0 : 5 * 60, pictured: !critical)
+                self.sleepIdle(within: critical ? 10 * 60 : nil, pictured: !critical)
             }
         }
         source.resume()
