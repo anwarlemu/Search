@@ -68,7 +68,7 @@ struct Plate<Content: View, Foot: View>: View {
             }
         }
         .frame(width: min(width, available.width), alignment: .leading)
-        .frame(maxHeight: available.height)
+        .modifier(Capped(height: available.height))
         .background(Palette.ground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
@@ -76,6 +76,27 @@ struct Plate<Content: View, Foot: View>: View {
                 .strokeBorder(Palette.hairline, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.16), radius: 34, y: 12)
+    }
+}
+
+/// No taller than the window allows, and no taller than what is in it.
+/// `.frame(maxHeight:)` would take the whole height it is offered and float
+/// a short plate in the middle of it (14 Oct 2026).
+private struct Capped: ViewModifier {
+    let height: CGFloat
+    func body(content: Content) -> some View { Cap(height: height) { content } }
+
+    private struct Cap: Layout {
+        let height: CGFloat
+        private func offer(_ proposal: ProposedViewSize) -> ProposedViewSize {
+            ProposedViewSize(width: proposal.width, height: min(proposal.height ?? height, height))
+        }
+        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+            subviews.first?.sizeThatFits(offer(proposal)) ?? .zero
+        }
+        func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+            subviews.first?.place(at: bounds.origin, proposal: offer(proposal))
+        }
     }
 }
 
