@@ -1229,8 +1229,9 @@ final class Browser: NSObject, ObservableObject {
               let open = Browser.openTorn
         else { return }
         if floating == tab.id { land() }
+        let place = tabs.firstIndex { $0.id == tab.id } ?? tabs.count
         if activeID == tab.id {
-            let index = tabs.firstIndex { $0.id == tab.id } ?? 0
+            let index = place
             let rest = tabs.filter { $0.id != tab.id }
             select(rest[min(index, rest.count - 1)])
         }
@@ -1247,7 +1248,36 @@ final class Browser: NSObject, ObservableObject {
             frame: NSRect(x: point.x - grip.x, y: point.y + grip.y - size.height, width: size.width, height: size.height)
         )
         open(tab.id)
-        if following { Browser.carry(tab.id, grip: grip) }
+        if following { Browser.carry(tab, from: self, at: place, grip: grip) }
+        writeSession()
+    }
+
+    /// Over the column or the strip — where a tab held out can be put back.
+    func overRow() -> Bool {
+        guard let window, let content = window.contentView else { return false }
+        let at = window.mouseLocationOutsideOfEventStream
+        guard content.bounds.contains(at) else { return false }
+        if prefs.sidebar { return at.x <= prefs.sideWidth }
+        return content.bounds.height - at.y <= Metrics.strip
+    }
+
+    /// A torn window giving its tab back while it is still held: the window
+    /// goes, the tab does not.
+    private func giveBack() -> Tab? {
+        guard isTorn, let tab = tabs.first else { return nil }
+        if floating == tab.id { land() }
+        tabs = []
+        activeID = nil
+        window?.close()
+        return tab
+    }
+
+    /// A tab brought home before it was let go of: back where it came from,
+    /// in front, with its page as it was.
+    private func takeBack(_ tab: Tab, at index: Int) {
+        prepare(tab)
+        tabs.insert(tab, at: min(max(0, index), tabs.count))
+        select(tab)
         writeSession()
     }
 
@@ -1263,23 +1293,36 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// The window just torn off rides with the pointer until the button is
-    /// let go of. The drag still belongs to the window it started in, so its
-    /// events are watched here rather than in the new one.
+    /// let go of. Brought back over the column or the strip first, the
+    /// window goes and the tab is home again; pulled out again, out it
+    /// comes again. The drag still belongs to the window it started in, so
+    /// its events are watched here rather than in the new one.
     private static var carrying: Any?
     static var carried: Bool { carrying != nil }
-    private static func carry(_ id: Tab.ID, grip: NSPoint) {
+    private static func carry(_ tab: Tab, from home: Browser, at index: Int, grip: NSPoint) {
         if let carrying { NSEvent.removeMonitor(carrying) }
-        carrying = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { event in
-            let torn = Browser.every.allObjects.first { $0.isTorn && $0.tabs.contains { $0.id == id } }
-            if let window = torn?.window {
-                torn?.placing = nil
-                let at = NSEvent.mouseLocation
-                window.setFrameTopLeftPoint(NSPoint(x: at.x - grip.x, y: at.y + grip.y))
+        var out = true
+        carrying = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak home, weak tab] event in
+            guard let home, let tab else { return event }
+            let torn = Browser.every.allObjects.first { $0.isTorn && $0.tabs.contains { $0.id == tab.id } }
+            let at = NSEvent.mouseLocation
+            if out {
+                if let torn, let window = torn.window {
+                    window.setFrameTopLeftPoint(NSPoint(x: at.x - grip.x, y: at.y + grip.y))
+                    // Back over where it came from: home it goes.
+                    if event.type == .leftMouseDragged, home.overRow(), torn.giveBack() != nil {
+                        home.takeBack(tab, at: index)
+                        out = false
+                    }
+                }
+            } else if event.type == .leftMouseDragged, home.pulledOut() {
+                home.tearOff(tab, at: at)
+                out = true
             }
             if event.type == .leftMouseUp {
                 if let carrying = Browser.carrying { NSEvent.removeMonitor(carrying) }
                 Browser.carrying = nil
-                if let window = torn?.window { Browser.bringForward(window) }
+                if out, let window = torn?.window { Browser.bringForward(window) }
             }
             return event
         }
