@@ -385,13 +385,25 @@ struct SideBar: View {
                     from = index
                     target = index
                 }
-                travel = value.translation.height
+                // No further than the first row or the last: past them the
+                // row slid out from under the column and out of sight
+                // (15 Oct 2026).
+                let up = -CGFloat(from) * step
+                let down = CGFloat(looseTabs.count - 1 - from) * step
+                travel = min(max(up, value.translation.height), down)
                 let wanted = min(max(0, from + Int((travel / step).rounded())), looseTabs.count - 1)
                 if wanted != target {
                     withAnimation(Motion.settle) { target = wanted }
                 }
             }
             .onEnded { _ in
+                // Let go of outside the window: a window of its own.
+                if let window = browser.window, !window.frame.contains(NSEvent.mouseLocation), browser.tabs.count > 1 {
+                    dragging = nil
+                    travel = 0
+                    browser.tearOff(tab, at: NSEvent.mouseLocation)
+                    return
+                }
                 // Positions here are among the loose rows; the pinned block
                 // sits in front of them in the real list.
                 withAnimation(Motion.settle) {

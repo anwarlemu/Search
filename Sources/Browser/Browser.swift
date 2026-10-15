@@ -939,13 +939,41 @@ final class Browser: NSObject, ObservableObject {
     /// Every window's browser, for the bench to find a private window's tabs.
     static let every = NSHashTable<Browser>.weakObjects()
 
-    init(private isPrivate: Bool = false) {
+    /// A window of its own for a tab dragged out of another, as in Safari
+    /// and Chrome. It shares everything with the main window but the row:
+    /// its tabs are written into the main window's session, and come back
+    /// there at the next launch. See `tearOff`.
+    let isTorn: Bool
+
+    /// A tab on its way to a window of its own, and where that window goes.
+    struct Handoff {
+        let tab: Tab
+        let frame: NSRect
+    }
+    static var handoffs: [Tab.ID: Handoff] = [:]
+    /// Opens the window for a handoff. Set by the window, which has SwiftUI's
+    /// `openWindow` to hand; a browser has no other way to ask for one.
+    static var openTorn: ((Tab.ID) -> Void)?
+    /// Where a torn window is put once it exists.
+    var placing: NSRect?
+
+    /// The main window's browser: the one with the session.
+    static var main: Browser? {
+        every.allObjects.first { !$0.isPrivate && !$0.isTorn }
+    }
+
+    init(private isPrivate: Bool = false, torn: Tab.ID? = nil) {
         self.isPrivate = isPrivate
+        self.isTorn = torn != nil
         privateStore = isPrivate ? .nonPersistent() : nil
         super.init()
         Browser.every.add(self)
         if isPrivate {
             beginPrivate()
+            return
+        }
+        if let torn {
+            beginTorn(Browser.handoffs.removeValue(forKey: torn))
             return
         }
         Shield.shared.enabled = prefs.shielded
@@ -985,65 +1013,7 @@ final class Browser: NSObject, ObservableObject {
             }
         }
 
-        // The little window's own three buttons.
-        floater.onReturn = { [weak self] in
-            guard let self else { return }
-            // The window closes first, and unconditionally. Hanging that on
-            // finding the tab again is how a little window survives the button
-            // meant to dismiss it.
-            let came = self.floating
-            self.land()
-            if let came, let tab = self.tab(came) {
-                self.reveal(tab)
-            }
-            // This window — the one the video came from — not whichever the
-            // app lists first, which could be a private window, the bench's
-            // room or the little window itself.
-            if let home = self.window ?? Links.window { Browser.bringForward(home) }
-        }
-        floater.onSkip = { [weak self] seconds in
-            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
-            tab.web.evaluateJavaScript(Isolate.skip(seconds))
-        }
-        floater.onProgress = { [weak self] answer in
-            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
-            tab.web.evaluateJavaScript(Isolate.where_) { found, _ in
-                MainActor.assumeIsolated {
-                    guard let state = Float.State(found) else { return }
-                    answer(state)
-                }
-            }
-        }
-        floater.onChapters = { [weak self] answer in
-            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
-            tab.web.evaluateJavaScript(Isolate.chapters) { found, _ in
-                MainActor.assumeIsolated {
-                    let list = (found as? [[Any]] ?? []).compactMap { pair -> Float.Chapter? in
-                        guard pair.count == 2, let start = pair[0] as? Double, let title = pair[1] as? String else { return nil }
-                        return Float.Chapter(start: start, title: title)
-                    }
-                    answer(list)
-                }
-            }
-        }
-        floater.onSeek = { [weak self] seconds in
-            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
-            tab.web.evaluateJavaScript(Isolate.seek(to: seconds))
-        }
-        floater.onCaptions = { [weak self] on in
-            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
-            tab.web.evaluateJavaScript(Isolate.captions(on: on))
-        }
-        floater.onPlayPause = { [weak self] answer in
-            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
-            tab.web.evaluateJavaScript(Isolate.toggle) { playing, _ in
-                MainActor.assumeIsolated { answer((playing as? Bool) ?? true) }
-            }
-        }
-        // The × puts the little window away and nothing else: the video goes
-        // back to its tab still playing. The window's own pause button is
-        // there for stopping it (15 Oct 2026).
-        floater.onClose = { [weak self] in self?.land() }
+        wireFloater()
 
         // Yesterday's tabs, or one empty one. Either way a web view is built
         // now, which starts a content process while the window is still being
@@ -1133,6 +1103,68 @@ final class Browser: NSObject, ObservableObject {
         window.makeKeyAndOrderFront(nil)
     }
 
+    /// The little window's buttons, answered by this window's tabs.
+    private func wireFloater() {
+        floater.onReturn = { [weak self] in
+            guard let self else { return }
+            // The window closes first, and unconditionally. Hanging that on
+            // finding the tab again is how a little window survives the button
+            // meant to dismiss it.
+            let came = self.floating
+            self.land()
+            if let came, let tab = self.tab(came) {
+                self.reveal(tab)
+            }
+            // This window — the one the video came from — not whichever the
+            // app lists first, which could be a private window, the bench's
+            // room or the little window itself.
+            if let home = self.window ?? Links.window { Browser.bringForward(home) }
+        }
+        floater.onSkip = { [weak self] seconds in
+            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
+            tab.web.evaluateJavaScript(Isolate.skip(seconds))
+        }
+        floater.onProgress = { [weak self] answer in
+            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
+            tab.web.evaluateJavaScript(Isolate.where_) { found, _ in
+                MainActor.assumeIsolated {
+                    guard let state = Float.State(found) else { return }
+                    answer(state)
+                }
+            }
+        }
+        floater.onChapters = { [weak self] answer in
+            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
+            tab.web.evaluateJavaScript(Isolate.chapters) { found, _ in
+                MainActor.assumeIsolated {
+                    let list = (found as? [[Any]] ?? []).compactMap { pair -> Float.Chapter? in
+                        guard pair.count == 2, let start = pair[0] as? Double, let title = pair[1] as? String else { return nil }
+                        return Float.Chapter(start: start, title: title)
+                    }
+                    answer(list)
+                }
+            }
+        }
+        floater.onSeek = { [weak self] seconds in
+            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
+            tab.web.evaluateJavaScript(Isolate.seek(to: seconds))
+        }
+        floater.onCaptions = { [weak self] on in
+            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
+            tab.web.evaluateJavaScript(Isolate.captions(on: on))
+        }
+        floater.onPlayPause = { [weak self] answer in
+            guard let self, let id = self.floating, let tab = self.tab(id) else { return }
+            tab.web.evaluateJavaScript(Isolate.toggle) { playing, _ in
+                MainActor.assumeIsolated { answer((playing as? Bool) ?? true) }
+            }
+        }
+        // The × puts the little window away and nothing else: the video goes
+        // back to its tab still playing. The window's own pause button is
+        // there for stopping it (15 Oct 2026).
+        floater.onClose = { [weak self] in self?.land() }
+    }
+
     /// A private window starts with one empty tab, and with nothing that
     /// reaches beyond it: no session read, no extensions, no bench, no
     /// updater, no taking over the icons that arrive for the main window.
@@ -1153,6 +1185,66 @@ final class Browser: NSObject, ObservableObject {
         let tab = freshTab()
         adopt(tab)
         watchForSleep()
+    }
+
+    /// A torn window starts with the tab it was dragged out with and the
+    /// main window's profile, and with nothing else of its own: no session
+    /// read, no extensions, no bench, no updater.
+    private func beginTorn(_ handoff: Handoff?) {
+        profileNames = [Browser.main.map { $0.profileNames[$0.profile] } ?? Session.firstName]
+        welcoming = false
+        bookmarks.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
+        prefs.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
+        keys.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
+        wireFloater()
+        placing = handoff?.frame
+        if let tab = handoff?.tab {
+            prepare(tab)
+            tabs = [tab]
+            activeID = tab.id
+            if tab.asleep { DispatchQueue.main.async { tab.wake() } }
+        } else {
+            adopt(freshTab())
+        }
+        watchForSleep()
+    }
+
+    /// A torn window closing takes its tabs with it, as any window's close
+    /// does; the main window's session is written without them.
+    func endTorn() {
+        guard isTorn else { return }
+        land()
+        dozing?.invalidate()
+        for tab in tabs { tab.close() }
+        tabs = []
+        Browser.every.remove(self)
+        Browser.main?.writeSession()
+    }
+
+    /// A tab dragged out of the window and let go of: a window of its own,
+    /// where it was dropped and the size of this one, with the page as it
+    /// was — the same web view, not loaded again.
+    func tearOff(_ tab: Tab, at point: NSPoint) {
+        guard !isPrivate, tabs.count > 1, tabs.contains(where: { $0.id == tab.id }),
+              let open = Browser.openTorn
+        else { return }
+        if floating == tab.id { land() }
+        if activeID == tab.id {
+            let index = tabs.firstIndex { $0.id == tab.id } ?? 0
+            let rest = tabs.filter { $0.id != tab.id }
+            select(rest[min(index, rest.count - 1)])
+        }
+        tabs.removeAll { $0.id == tab.id }
+        chosen.remove(tab.id)
+        let size = window?.frame.size ?? NSSize(width: 1180, height: 780)
+        // The pointer lands on the new window's row, a little in from its
+        // left, where the tab now is.
+        Browser.handoffs[tab.id] = Handoff(
+            tab: tab,
+            frame: NSRect(x: point.x - 120, y: point.y - size.height + 18, width: size.width, height: size.height)
+        )
+        open(tab.id)
+        writeSession()
     }
 
     /// The few settings that something else has to be told about. The rest are
@@ -1256,8 +1348,14 @@ final class Browser: NSObject, ObservableObject {
     private func writeSession(now: Bool = false) {
         // A private window is in no session: nothing of it comes back.
         guard !isPrivate else { return }
+        // A torn window's tabs are the main window's to write.
+        if isTorn {
+            Browser.main?.rememberSession()
+            return
+        }
+        let torn = Browser.every.allObjects.filter(\.isTorn).flatMap(\.tabs)
         let spaces = profileNames.indices.map { index -> Session.Space in
-            let list = index == profile ? tabs : (parked[index]?.tabs ?? [])
+            let list = index == profile ? tabs + torn : (parked[index]?.tabs ?? [])
             let front = index == profile ? activeID : parked[index]?.active
             var entries: [Session.Entry] = []
             var active = 0
@@ -1405,6 +1503,10 @@ final class Browser: NSObject, ObservableObject {
             return
         }
 
+        if tabs.count == 1, isTorn {
+            window?.performClose(nil)
+            return
+        }
         if tabs.count == 1 {
             if tab.isBlank {
                 if let other = profileWithPages() {

@@ -320,6 +320,21 @@ final class Bench {
             browser.select(tab)
             answer(describe(tab))
 
+        case "tear":
+            // A tab dragged out and let go of, without a hand: its own window,
+            // near the middle of the screen. --test runs only, like select.
+            guard Store.testing else {
+                answer(["error": "tear only works on a --test run — it would open a window on you"])
+                return
+            }
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            let screen = NSScreen.main?.visibleFrame ?? .zero
+            browser.tearOff(tab, at: NSPoint(x: screen.midX, y: screen.midY + 200))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                let torn = Browser.every.allObjects.filter(\.isTorn)
+                answer(["windows": torn.count, "left": browser.tabs.count, "torn": torn.flatMap(\.tabs).map(Bench.short)])
+            }
+
         case "text":
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             house(tab)
@@ -726,7 +741,7 @@ final class Bench {
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
                 "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "ui",
-                "key", "press", "mouse", "resize", "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload",
+                "key", "press", "tear", "mouse", "resize", "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload",
                 "ext-page", "ext-popup", "ext-menu", "ext-pin", "ext-shot", "ext-answer", "ext-enable",
             ]])
         }

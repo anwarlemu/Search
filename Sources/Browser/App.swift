@@ -223,6 +223,32 @@ struct BrowserApp: App {
         .defaultSize(width: 1180, height: 780)
         .handlesExternalEvents(matching: [])
         .privateRestoration()
+
+        // A tab dragged out of a window. Not brought back as a window at the
+        // next launch: its tabs are in the main window's session, and come
+        // back there.
+        WindowGroup("Browser", id: "tab", for: Tab.ID.self) { $id in
+            TornWindow(id: id)
+                .frame(minWidth: 640, minHeight: 420)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1180, height: 780)
+        .handlesExternalEvents(matching: [])
+        .privateRestoration()
+    }
+}
+
+/// A torn-off tab's window, with a browser of its own made for it.
+private struct TornWindow: View {
+    @StateObject private var browser: Browser
+
+    init(id: Tab.ID?) {
+        _browser = StateObject(wrappedValue: Browser(torn: id ?? UUID()))
+    }
+
+    var body: some View {
+        ContentView(browser: browser)
+            .focusedSceneObject(browser)
     }
 }
 
@@ -573,7 +599,10 @@ struct ContentView: View {
             browser.askFocus()
             // Addresses from other apps have somewhere to go from here on —
             // the main window, never a private one.
-            if !browser.isPrivate { Links.hand(to: browser) }
+            if !browser.isPrivate && !browser.isTorn { Links.hand(to: browser) }
+            // A tab dragged out of any window opens its own through this.
+            let open = openWindow
+            Browser.openTorn = { id in open(id: "tab", value: id) }
         }
         // The monitor holds this view, and the view its browser: a closed
         // private window kept its whole browser alive until the monitor was
@@ -780,6 +809,24 @@ struct ContentView: View {
             let browser = browser
             NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
                 MainActor.assumeIsolated { browser.endPrivate() }
+            }
+        } else if browser.isTorn {
+            let browser = browser
+            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
+                MainActor.assumeIsolated { browser.endTorn() }
+            }
+            // Where the tab was let go of, kept on a screen.
+            if let spot = browser.placing {
+                browser.placing = nil
+                let screen = (NSScreen.screens.first { $0.frame.contains(NSPoint(x: spot.minX + 120, y: spot.maxY)) } ?? NSScreen.main)?.visibleFrame ?? spot
+                var frame = spot
+                frame.size.width = min(frame.width, screen.width)
+                frame.size.height = min(frame.height, screen.height)
+                frame.origin.x = min(max(screen.minX, frame.minX), screen.maxX - frame.width)
+                frame.origin.y = min(max(screen.minY, frame.minY), screen.maxY - frame.height)
+                // A turn later: SwiftUI puts a new window where it likes once
+                // it is shown, over whatever was set before.
+                DispatchQueue.main.async { window.setFrame(frame, display: true) }
             }
         } else {
             Links.window = window

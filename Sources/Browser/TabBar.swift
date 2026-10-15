@@ -306,17 +306,25 @@ private struct TabRun: View {
                     target = index
                     stride = step
                 }
-                travel = value.translation.width
-                // Pins move among pins, titles among titles.
+                // Pins move among pins, titles among titles — and the held
+                // pill no further than the first or last place it could take.
                 let pinned = browser.pinnedCount
                 let low = tab.pin != nil ? 0 : pinned
                 let high = tab.pin != nil ? max(0, pinned - 1) : browser.tabs.count - 1
+                travel = min(max(CGFloat(low - from) * step, value.translation.width), CGFloat(high - from) * step)
                 let wanted = min(max(low, from + Int((travel / step).rounded())), high)
                 if wanted != target {
                     withAnimation(Motion.settle) { target = wanted }
                 }
             }
             .onEnded { _ in
+                // Let go of outside the window: a window of its own.
+                if let window = browser.window, !window.frame.contains(NSEvent.mouseLocation), browser.tabs.count > 1 {
+                    dragging = nil
+                    travel = 0
+                    browser.tearOff(tab, at: NSEvent.mouseLocation)
+                    return
+                }
                 // One move and the return of every offset in the same breath:
                 // each tab's place changes by exactly what its offset gives
                 // back, so only the held tab is seen to move — into its slot.
