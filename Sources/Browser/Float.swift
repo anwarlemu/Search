@@ -652,6 +652,11 @@ final class Float {
             let screen = Float.screen(of: window.frame)
             let target = Float.corner(for: window.frame, velocity: velocity, on: screen)
             guard target != window.frame else { return }
+            // Reduce Motion: straight there, no glide across the screen.
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                window.setFrame(target, display: true)
+                return
+            }
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.28
                 context.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)

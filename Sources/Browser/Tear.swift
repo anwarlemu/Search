@@ -37,7 +37,7 @@ final class TearPreview {
         panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
             panel.animator().alphaValue = 0.94
         }
     }
@@ -55,7 +55,7 @@ final class TearPreview {
         guard panel.alphaValue != alpha else { return }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
             panel.animator().alphaValue = alpha
         }
     }
