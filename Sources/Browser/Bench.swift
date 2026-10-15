@@ -335,6 +335,13 @@ final class Bench {
                 answer(["windows": torn.count, "left": browser.tabs.count, "torn": torn.flatMap(\.tabs).map(Bench.short)])
             }
 
+        case "card":
+            // The card a tab shows when rested on, without a pointer. --test only.
+            guard Store.testing else { answer(["error": "card only works on a --test run"]); return }
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            browser.card.hover(tab, in: browser)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { answer(["shown": true]) }
+
         case "give":
             // A tab dropped on another window's row: from a torn window to
             // the main one, or from the main one to a torn one. --test only.
@@ -762,7 +769,7 @@ final class Bench {
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
                 "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "ui",
-                "key", "press", "tear", "give", "mouse", "resize", "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload",
+                "key", "press", "tear", "give", "card", "mouse", "resize", "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload",
                 "ext-page", "ext-popup", "ext-menu", "ext-pin", "ext-shot", "ext-answer", "ext-enable",
             ]])
         }

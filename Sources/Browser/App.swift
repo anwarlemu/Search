@@ -611,6 +611,11 @@ struct ContentView: View {
             // A tab dragged out of any window opens its own through this.
             let open = openWindow
             Browser.openTorn = { id in open(id: "tab", value: id) }
+            // Yesterday's other windows, now that there is a way to open them.
+            if browser === Browser.main {
+                for id in Browser.reopening { open(id: "tab", value: id) }
+                Browser.reopening = []
+            }
         }
         // The monitor holds this view, and the view its browser: a closed
         // private window kept its whole browser alive until the monitor was

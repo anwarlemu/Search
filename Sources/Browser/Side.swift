@@ -104,6 +104,13 @@ struct SideBar: View {
             browser.take(providers)
         }
         .animation(Motion.quick, value: landing)
+        // The Mac's drag took a held tab over and the row's drag never ended.
+        .onChange(of: browser.dragEnded) { _, _ in
+            withAnimation(Motion.settle) {
+                dragging = nil
+                travel = 0
+            }
+        }
         .animation(Motion.glide, value: browser.activeID)
         .animation(Motion.glide, value: browser.editingTab)
         .animation(Motion.settle, value: browser.tabs.map(\.id))

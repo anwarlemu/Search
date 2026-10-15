@@ -947,9 +947,27 @@ final class Browser: NSObject, ObservableObject {
 
     /// A tab on its way to a window of its own, and where that window goes.
     struct Handoff {
-        let tab: Tab
+        let tabs: [Tab]
+        var active = 0
         let frame: NSRect
+
+        init(tab: Tab, frame: NSRect) {
+            tabs = [tab]
+            self.frame = frame
+        }
+
+        init(tabs: [Tab], active: Int, frame: NSRect) {
+            self.tabs = tabs
+            self.active = active
+            self.frame = frame
+        }
     }
+    /// Windows from the last session, waiting for the main window to be up
+    /// and able to open them.
+    static var reopening: [Tab.ID] = []
+    /// ⌘Q under way: windows closing now are not being closed by anyone,
+    /// and their tabs stay in the session.
+    static var quitting = false
     static var handoffs: [Tab.ID: Handoff] = [:]
     /// Opens the window for a handoff. Set by the window, which has SwiftUI's
     /// `openWindow` to hand; a browser has no other way to ask for one.
@@ -1025,6 +1043,20 @@ final class Browser: NSObject, ObservableObject {
         }
 
         let saved = Session.read()
+        // The other windows' tabs, asleep like every restored tab, handed
+        // over now and opened once this window is up to open them.
+        for window in saved.windows ?? [] {
+            let restored = window.tabs.compactMap { entry -> Tab? in
+                guard let url = URL(string: entry.url) else { return nil }
+                let tab = Tab()
+                tab.restore(url: url, title: entry.title)
+                tab.pin = entry.pin
+                return tab
+            }
+            guard let first = restored.first else { continue }
+            Browser.handoffs[first.id] = Handoff(tabs: restored, active: window.active, frame: NSRectFromString(window.frame))
+            Browser.reopening.append(first.id)
+        }
         let spaces = saved.profiles.isEmpty
             ? [Session.Space(name: Session.firstName, tabs: [], active: 0)]
             : saved.profiles
@@ -1198,11 +1230,12 @@ final class Browser: NSObject, ObservableObject {
         keys.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         wireFloater()
         placing = handoff?.frame
-        if let tab = handoff?.tab {
-            prepare(tab)
-            tabs = [tab]
-            activeID = tab.id
-            if tab.asleep { DispatchQueue.main.async { tab.wake() } }
+        if let handoff, !handoff.tabs.isEmpty {
+            handoff.tabs.forEach(prepare)
+            tabs = handoff.tabs
+            let front = tabs[min(max(0, handoff.active), tabs.count - 1)]
+            activeID = front.id
+            DispatchQueue.main.async { _ = front.wake() }
         } else {
             adopt(freshTab())
         }
@@ -1212,7 +1245,7 @@ final class Browser: NSObject, ObservableObject {
     /// A torn window closing takes its tabs with it, as any window's close
     /// does; the main window's session is written without them.
     func endTorn() {
-        guard isTorn else { return }
+        guard isTorn, !Browser.quitting else { return }
         land()
         dozing?.invalidate()
         for tab in tabs { tab.close() }
@@ -1264,13 +1297,22 @@ final class Browser: NSObject, ObservableObject {
     /// button: it closes the tab it is pressed on, as everywhere else.
     var pointed: Tab.ID?
     func point(at tab: Tab, _ over: Bool) {
-        if over { pointed = tab.id } else if pointed == tab.id { pointed = nil }
+        if over {
+            pointed = tab.id
+            card.hover(tab, in: self)
+        } else if pointed == tab.id {
+            pointed = nil
+            card.leave()
+        }
     }
+    /// What a tab under the pointer says about itself. See Hover.swift.
+    private(set) lazy var card = HoverCard()
     private lazy var preview = TearPreview()
 
     /// Asked on every step of a tab's drag. True while the tab is held
     /// out, when the row should leave it alone.
     func dragging(_ tab: Tab) -> Bool {
+        card.hide()
         // A private tab's page lives in the private window's own store, and
         // nowhere else.
         guard !isPrivate else { return false }
@@ -1283,7 +1325,15 @@ final class Browser: NSObject, ObservableObject {
             }
             // Over another window's row the card makes way: the tab is
             // going in there, not into a window of its own.
-            preview.over(nil == Browser.landing(at: at, from: self), frame: tornFrame(at: at))
+            let landing = Browser.landing(at: at, from: self)
+            preview.over(landing == nil, frame: tornFrame(at: at))
+            // Over another app: the Mac's own drag of its address from here.
+            if landing == nil, TabDragOut.overOtherApp() {
+                preview.hide()
+                if !TabDragOut.shared.begin(tab, from: self) {
+                    preview.show(tab, sidebar: prefs.sidebar ? prefs.sideWidth : nil, frame: tornFrame(at: at))
+                }
+            }
             return true
         }
         // The only tab in a window comes out only to go into another one.
@@ -1293,6 +1343,26 @@ final class Browser: NSObject, ObservableObject {
         preview.over(Browser.landing(at: at, from: self) == nil, frame: tornFrame(at: at))
         return true
     }
+
+    /// The Mac's drag of a held-out tab has ended. Taken by another app,
+    /// the tab stays where it was; taken by nothing, it gets a window of its
+    /// own where it was let go of; dropped on one of this app's rows, it
+    /// moves there (see `take`).
+    func droppedOut(_ tab: Tab, at point: NSPoint, taken: Bool) {
+        guard heldOut == tab.id else { return }
+        heldOut = nil
+        preview.hide()
+        dragEnded += 1
+        guard !taken, tabs.contains(where: { $0.id == tab.id }) else { return }
+        if let other = Browser.landing(at: point, from: self) {
+            give(tab, to: other, at: point)
+        } else if tabs.count > 1 {
+            tearOff(tab, at: point)
+        }
+    }
+    /// Counted each time the Mac's drag takes a tab's drag over: the row's
+    /// own drag never hears that it ended, and is told this way instead.
+    @Published var dragEnded = 0
 
     /// The drag is over. True when the tab left this window — into a window
     /// of its own, or into another window's row.
@@ -1489,10 +1559,7 @@ final class Browser: NSObject, ObservableObject {
             Browser.main?.rememberSession()
             return
         }
-        let torn = Browser.every.allObjects.filter(\.isTorn).flatMap(\.tabs)
-        let spaces = profileNames.indices.map { index -> Session.Space in
-            let list = index == profile ? tabs + torn : (parked[index]?.tabs ?? [])
-            let front = index == profile ? activeID : parked[index]?.active
+        func written(_ list: [Tab], front: Tab.ID?) -> (entries: [Session.Entry], active: Int) {
             var entries: [Session.Entry] = []
             var active = 0
             for tab in list where !tab.shy && !tab.bench {
@@ -1505,9 +1572,21 @@ final class Browser: NSObject, ObservableObject {
                 if tab.id == front { active = entries.count }
                 entries.append(Session.Entry(url: url.absoluteString, title: tab.title, pin: tab.pin))
             }
-            return Session.Space(name: profileNames[index], tabs: entries, active: active)
+            return (entries, active)
         }
-        Session.write(now: now, .init(profiles: spaces, current: profile))
+        let spaces = profileNames.indices.map { index -> Session.Space in
+            let list = index == profile ? tabs : (parked[index]?.tabs ?? [])
+            let front = index == profile ? activeID : parked[index]?.active
+            let done = written(list, front: front)
+            return Session.Space(name: profileNames[index], tabs: done.entries, active: done.active)
+        }
+        // Each other window as itself, where it was: it opens there again.
+        let windows = Browser.every.allObjects.filter(\.isTorn).compactMap { other -> Session.Window? in
+            let done = written(other.tabs, front: other.activeID)
+            guard !done.entries.isEmpty, let frame = other.window?.frame else { return nil }
+            return Session.Window(frame: NSStringFromRect(frame), tabs: done.entries, active: done.active)
+        }
+        Session.write(now: now, .init(profiles: spaces, current: profile, windows: windows))
     }
 
     func rememberSession() {
@@ -1572,6 +1651,8 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func select(_ tab: Tab) {
+        // A card about a tab is for choosing it; once chosen, it is in the way.
+        card.hide()
         cancelTabEdit()
         summoning = false
         suggesting = nil
@@ -1689,6 +1770,12 @@ final class Browser: NSObject, ObservableObject {
 
     /// A link let go of over the tabs becomes a tab among them.
     func take(_ providers: [NSItemProvider]) -> Bool {
+        // A tab of this app's on its way out, dropped back on a row: it
+        // moves rather than opening a second copy of itself.
+        if TabDragOut.shared.active, let tab = TabDragOut.shared.tab, let from = TabDragOut.shared.from {
+            if from !== self, !isPrivate { from.give(tab, to: self, at: NSEvent.mouseLocation) }
+            return true
+        }
         var took = false
         for provider in providers {
             if provider.canLoadObject(ofClass: URL.self) {

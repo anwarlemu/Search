@@ -91,3 +91,89 @@ final class TearPreview {
         return panel
     }
 }
+
+/// A tab held out over another app's window becomes the Mac's own drag of
+/// its address, so it can be dropped into Slack, Notes, Mail or a Finder
+/// window as a link — the way Safari and Chrome let a tab go. The tab stays
+/// where it was. Let go of over nothing that takes a link, it gets a window
+/// of its own after all; over one of this app's windows, it moves there.
+@MainActor
+final class TabDragOut: NSObject, NSDraggingSource {
+    static let shared = TabDragOut()
+    /// The tab on its way out, and the window it is leaving.
+    private(set) var tab: Tab?
+    private(set) weak var from: Browser?
+
+    var active: Bool { tab != nil }
+
+    /// Over a window that belongs to another app, at the pointer.
+    static func overOtherApp() -> Bool {
+        let at = NSEvent.mouseLocation
+        guard let top = NSScreen.screens.first?.frame.maxY,
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else { return false }
+        // Window bounds run down from the top of the first screen.
+        let point = CGPoint(x: at.x, y: top - at.y)
+        let me = ProcessInfo.processInfo.processIdentifier
+        for window in list {
+            guard (window[kCGWindowLayer as String] as? Int) == 0,
+                  let bounds = window[kCGWindowBounds as String] as? [String: Any],
+                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary),
+                  rect.contains(point)
+            else { continue }
+            // The topmost window under the pointer decides.
+            return (window[kCGWindowOwnerPID as String] as? Int32) != me
+        }
+        return false
+    }
+
+    /// Starts the drag from the window the tab is held in, on the drag
+    /// event under way.
+    func begin(_ tab: Tab, from browser: Browser) -> Bool {
+        guard let url = tab.pending ?? tab.address, ["http", "https"].contains(url.scheme ?? ""),
+              let view = browser.window?.contentView,
+              let event = NSApp.currentEvent, event.type == .leftMouseDragged
+        else { return false }
+        self.tab = tab
+        from = browser
+
+        let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+        let label = TabDragOut.picture(title: tab.title.isEmpty ? Address.pretty(url) : tab.title, icon: tab.icon)
+        let at = view.convert(event.locationInWindow, from: nil)
+        item.setDraggingFrame(NSRect(x: at.x - 16, y: at.y - label.size.height / 2, width: label.size.width, height: label.size.height), contents: label)
+        let session = view.beginDraggingSession(with: [item], event: event, source: self)
+        session.animatesToStartingPositionsOnCancelOrFail = false
+        return true
+    }
+
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        context == .outsideApplication ? [.copy, .link] : [.copy, .link, .move]
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        let tab = self.tab
+        let from = self.from
+        self.tab = nil
+        self.from = nil
+        guard let tab, let from else { return }
+        from.droppedOut(tab, at: screenPoint, taken: operation != [])
+    }
+
+    /// The tab, small, as it travels: its icon and its title on a pill.
+    private static func picture(title: String, icon: NSImage?) -> NSImage {
+        let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        let text = NSAttributedString(string: String(title.prefix(48)), attributes: [.font: font, .foregroundColor: NSColor.labelColor])
+        let width = min(320, ceil(text.size().width)) + 44
+        let size = NSSize(width: width, height: 28)
+        return NSImage(size: size, flipped: false) { rect in
+            let shape = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
+            NSColor.windowBackgroundColor.withAlphaComponent(0.96).setFill()
+            shape.fill()
+            NSColor.separatorColor.setStroke()
+            shape.stroke()
+            icon?.draw(in: NSRect(x: 9, y: 6, width: 16, height: 16))
+            text.draw(with: NSRect(x: 32, y: 7, width: width - 40, height: 16), options: [.truncatesLastVisibleLine, .usesLineFragmentOrigin])
+            return true
+        }
+    }
+}

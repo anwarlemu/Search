@@ -22,6 +22,16 @@ enum Session {
     struct Shape: Codable {
         var profiles: [Space]
         var current: Int
+        /// The windows besides the main one — tabs torn off, ⌘N — each where
+        /// it was on screen. Missing from files written before there were
+        /// any (15 Oct 2026).
+        var windows: [Window]? = nil
+    }
+
+    struct Window: Codable {
+        var frame: String
+        var tabs: [Entry]
+        var active: Int
     }
 
     /// The file from before there were profiles: one set of tabs. Still

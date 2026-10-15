@@ -26,6 +26,14 @@ final class Links: NSObject, NSApplicationDelegate {
         Links.flush?()
     }
 
+    /// Before any window is closed on the way out: the other windows are
+    /// written as windows, not forgotten as each one closes.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        Browser.quitting = true
+        Links.flush?()
+        return .terminateNow
+    }
+
     /// The nearest thing to a crash reporter a browser with no server can
     /// have: nothing is sent anywhere, but a beta with no record of what
     /// went wrong is a beta nobody can fix. One line, appended, so it
