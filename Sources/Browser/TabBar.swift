@@ -112,6 +112,7 @@ struct TabBar: View {
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .frame(height: Metrics.strip)
+        .background(WindowGrip())
         .onHover { nearby = $0 }
         // A link dragged onto the row opens there.
         .onDrop(of: [.url, .text], isTargeted: $landing) { providers in
@@ -300,6 +301,15 @@ private struct TabRun: View {
         // In the row's space, not the pill's — see the sidebar's grid for why.
         DragGesture(minimumDistance: 5, coordinateSpace: .named("strip"))
             .onChanged { value in
+                // Pulled clear of the row: out it comes at once, in a window
+                // of its own that follows the pointer from here.
+                guard browser.tabs.contains(where: { $0.id == tab.id }) else { return }
+                if browser.pulledOut() {
+                    dragging = nil
+                    travel = 0
+                    browser.tearOff(tab, at: NSEvent.mouseLocation, following: true)
+                    return
+                }
                 if dragging != tab.id {
                     dragging = tab.id
                     from = index
@@ -318,6 +328,7 @@ private struct TabRun: View {
                 }
             }
             .onEnded { _ in
+                guard browser.tabs.contains(where: { $0.id == tab.id }) else { return }
                 // Let go of outside the window: a window of its own.
                 if let window = browser.window, !window.frame.contains(NSEvent.mouseLocation), browser.tabs.count > 1 {
                     dragging = nil

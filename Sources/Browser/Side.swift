@@ -94,6 +94,7 @@ struct SideBar: View {
         }
         .frame(width: prefs.sideWidth)
         .frame(maxHeight: .infinity)
+        .background(WindowGrip())
         .background(landing ? Palette.hover : Palette.ground)
         .overlay(alignment: .trailing) {
             Rectangle().fill(Palette.hairline).frame(width: 1)
@@ -380,6 +381,15 @@ struct SideBar: View {
     private func reorder(tab: Tab, index: Int, step: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 5, coordinateSpace: .named("rows"))
             .onChanged { value in
+                // Pulled clear of the row: out it comes at once, in a window
+                // of its own that follows the pointer from here.
+                guard browser.tabs.contains(where: { $0.id == tab.id }) else { return }
+                if browser.pulledOut() {
+                    dragging = nil
+                    travel = 0
+                    browser.tearOff(tab, at: NSEvent.mouseLocation, following: true)
+                    return
+                }
                 if dragging != tab.id {
                     dragging = tab.id
                     from = index
@@ -397,6 +407,7 @@ struct SideBar: View {
                 }
             }
             .onEnded { _ in
+                guard browser.tabs.contains(where: { $0.id == tab.id }) else { return }
                 // Let go of outside the window: a window of its own.
                 if let window = browser.window, !window.frame.contains(NSEvent.mouseLocation), browser.tabs.count > 1 {
                     dragging = nil

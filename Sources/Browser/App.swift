@@ -817,16 +817,20 @@ struct ContentView: View {
             }
             // Where the tab was let go of, kept on a screen.
             if let spot = browser.placing {
-                browser.placing = nil
                 let screen = (NSScreen.screens.first { $0.frame.contains(NSPoint(x: spot.minX + 120, y: spot.maxY)) } ?? NSScreen.main)?.visibleFrame ?? spot
                 var frame = spot
                 frame.size.width = min(frame.width, screen.width)
                 frame.size.height = min(frame.height, screen.height)
                 frame.origin.x = min(max(screen.minX, frame.minX), screen.maxX - frame.width)
                 frame.origin.y = min(max(screen.minY, frame.minY), screen.maxY - frame.height)
+                browser.placing = nil
                 // A turn later: SwiftUI puts a new window where it likes once
                 // it is shown, over whatever was set before.
-                DispatchQueue.main.async { window.setFrame(frame, display: true) }
+                DispatchQueue.main.async {
+                    // Unless the pointer has the window already.
+                    guard !Browser.carried else { return }
+                    window.setFrame(frame, display: true)
+                }
             }
         } else {
             Links.window = window
