@@ -896,24 +896,68 @@ struct OneClick: ViewModifier {
 
 /// An almost-closed ring, turning — the same one the canvas app uses, small
 /// enough to sit inside a tab without becoming the loudest thing in it.
-struct Ring: View {
+///
+/// A layer the window server turns, not a SwiftUI angle: a repeating SwiftUI
+/// animation re-laid the whole window out every frame for as long as any tab
+/// was loading, and a page that never quite finishes kept the browser busy
+/// with nothing on screen changing but this.
+struct Ring: NSViewRepresentable {
     var size: CGFloat = 10
-    @State private var angle: Double = 0
 
-    var body: some View {
-        Circle()
-            .trim(from: 0, to: 0.78)
-            .stroke(
-                Palette.muted.opacity(0.7),
-                style: StrokeStyle(lineWidth: 1.4, lineCap: .round)
-            )
-            .frame(width: size, height: size)
-            .rotationEffect(.degrees(angle))
-            .onAppear {
-                withAnimation(.linear(duration: 0.85).repeatForever(autoreverses: false)) {
-                    angle = 360
-                }
+    func makeNSView(context: Context) -> Spinner { Spinner(size: size) }
+    func updateNSView(_ view: Spinner, context: Context) {}
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: Spinner, context: Context) -> CGSize? {
+        CGSize(width: size, height: size)
+    }
+
+    final class Spinner: NSView {
+        private let ring = CAShapeLayer()
+
+        init(size: CGFloat) {
+            super.init(frame: NSRect(x: 0, y: 0, width: size, height: size))
+            wantsLayer = true
+            ring.frame = bounds
+            ring.path = CGPath(ellipseIn: bounds.insetBy(dx: 0.7, dy: 0.7), transform: nil)
+            ring.fillColor = nil
+            ring.lineWidth = 1.4
+            ring.lineCap = .round
+            ring.strokeEnd = 0.78
+            layer?.addSublayer(ring)
+            paint()
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        override var isFlipped: Bool { true }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil, ring.animation(forKey: "turn") == nil else { return }
+            let turn = CABasicAnimation(keyPath: "transform.rotation.z")
+            turn.fromValue = 0
+            turn.toValue = -2 * Double.pi
+            turn.duration = 0.85
+            turn.repeatCount = .infinity
+            turn.isRemovedOnCompletion = false
+            ring.add(turn, forKey: "turn")
+        }
+
+        override func layout() {
+            super.layout()
+            ring.frame = bounds
+            ring.path = CGPath(ellipseIn: bounds.insetBy(dx: 0.7, dy: 0.7), transform: nil)
+        }
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            paint()
+        }
+
+        private func paint() {
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                ring.strokeColor = Palette.NS.muted.withAlphaComponent(0.7).cgColor
             }
+        }
     }
 }
 
