@@ -29,6 +29,8 @@ struct BrowserApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("New Tab") { current.newTab() }
                     .keyboardShortcut(current.keys.menu(.newTab))
+                Button("New Window") { current.newWindow() }
+                    .keyboardShortcut(current.keys.menu(.newWindow))
                 Button("New Private Window") { openWindow(id: "private") }
                     .keyboardShortcut(current.keys.menu(.newPrivateTab))
                 Button("New Private Tab") { current.newShyTab() }
@@ -208,6 +210,11 @@ struct BrowserApp: App {
                 Button("Passwords…") { current.managing = true }
                     .keyboardShortcut(current.keys.menu(.passwords))
             }
+            // Safari's: every window's tabs into the one in front.
+            CommandGroup(after: .windowArrangement) {
+                Button("Merge All Windows") { current.mergeAllWindows() }
+                    .disabled(current.isPrivate)
+            }
             CommandGroup(replacing: .help) {
                 Button("Send Feedback…") { Links.writeFeedback() }
             }
@@ -371,6 +378,7 @@ struct ContentView: View {
     @Environment(\.openWindow) private var openWindow
 
     @State private var keys: Any?
+    @State private var middle: Any?
     @State private var window: NSWindow?
     @State private var resting: RestingLights?
 
@@ -610,6 +618,8 @@ struct ContentView: View {
         .onDisappear {
             if let keys { NSEvent.removeMonitor(keys) }
             keys = nil
+            if let middle { NSEvent.removeMonitor(middle) }
+            middle = nil
         }
     }
 
@@ -889,7 +899,23 @@ struct ContentView: View {
     /// shortcuts are caught before the event ever reaches it. The menu carries
     /// the same commands for anyone looking for them, and never sees these
     /// keystrokes because this runs first.
+    /// The middle button on a tab closes it, in the row or the column, as
+    /// in Chrome, Safari and Arc. Pages keep the middle button for their own
+    /// links; only a tab under the pointer is taken.
+    private func watchMiddle() {
+        guard middle == nil else { return }
+        middle = NSEvent.addLocalMonitorForEvents(matching: .otherMouseUp) { event in
+            guard event.buttonNumber == 2, let own = browser.window, event.window === own,
+                  let id = browser.pointed, let tab = browser.tabs.first(where: { $0.id == id })
+            else { return event }
+            browser.pointed = nil
+            withAnimation(Motion.settle) { browser.close(tab) }
+            return nil
+        }
+    }
+
     private func watchKeys() {
+        watchMiddle()
         guard keys == nil else { return }
         keys = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
             // Every window has one of these, and each sees every key the app
@@ -956,6 +982,12 @@ struct ContentView: View {
             if browser.picked != nil {
                 browser.picked = nil
                 return true
+            }
+            // A page still on its way stops, as in Chrome — and the key goes
+            // on to the page, which may want it as well.
+            if !browser.editing, let tab = browser.active, tab.loading {
+                tab.stop()
+                return false
             }
             guard browser.editing, browser.active?.isBlank == false else { return false }
             browser.dismiss()
@@ -1078,6 +1110,7 @@ struct ContentView: View {
     private func perform(_ command: Keys.Command) {
         switch command {
         case .newTab: browser.newTab()
+        case .newWindow: browser.newWindow()
         case .newPrivateTab: openWindow(id: "private")
         case .reopenTab: browser.reopen()
         case .closeTab: if let tab = browser.active { browser.close(tab) }

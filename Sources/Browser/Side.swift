@@ -439,6 +439,7 @@ struct SideBar: View {
 
     private var newTab: some View {
         Quiet(icon: "plus", title: "New tab", height: SideBar.row) { browser.newTab() }
+            .contextMenu { RecentlyClosed(browser: browser) }
             .padding(.top, SideBar.gap)
     }
 
@@ -524,7 +525,7 @@ private struct PinSquare: View, Equatable {
         // A tap with ⇧ down never reaches the gesture above on macOS — SwiftUI
         // keeps ⇧-clicks for its own lists — so the run is asked for here.
         .simultaneousGesture(TapGesture().modifiers(.shift).onEnded { _ = browser.choose(tab, with: .shift) })
-        .onHover { hovering = $0 }
+        .onHover { hovering = $0; browser.point(at: tab, $0) }
         .contextMenu { TabMenu(browser: browser, tab: tab, close: { browser.close(tab) }) }
         .help(tab.label)
         .animation(Motion.quick, value: hovering)
@@ -637,7 +638,7 @@ private struct SideRow: View, Equatable {
         // A tap with ⇧ down never reaches the gesture above on macOS — SwiftUI
         // keeps ⇧-clicks for its own lists — so the run is asked for here.
         .simultaneousGesture(TapGesture().modifiers(.shift).onEnded { _ = browser.choose(tab, with: .shift) })
-        .onHover { hovering = $0 }
+        .onHover { hovering = $0; browser.point(at: tab, $0) }
         .contextMenu { TabMenu(browser: browser, tab: tab, close: close) }
         .animation(Motion.quick, value: hovering)
         .animation(Motion.glide, value: editing)
@@ -717,12 +718,19 @@ struct Door: View {
     let icon: String
     var on = false
     var help = ""
+    /// A press held down instead of a click — back and forward's list.
+    var hold: (() -> Void)? = nil
     let act: () -> Void
 
     @State private var hovering = false
+    /// The hold answered, so the release that ends it is not a click too.
+    @State private var held = false
 
     var body: some View {
-        Button(action: act) {
+        Button {
+            if held { held = false; return }
+            act()
+        } label: {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(on ? Palette.ink : (hovering ? Palette.ink.opacity(0.7) : Palette.muted))
@@ -734,6 +742,16 @@ struct Door: View {
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.45).onEnded { _ in
+                guard let hold else { return }
+                held = true
+                hold()
+                // The menu took the release; nothing will clear this but time.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { held = false }
+            },
+            including: hold == nil ? .subviews : .all
+        )
         .onHover { hovering = $0 }
         .help(help)
         .animation(Motion.quick, value: hovering)

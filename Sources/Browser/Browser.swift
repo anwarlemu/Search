@@ -1224,7 +1224,7 @@ final class Browser: NSObject, ObservableObject {
     /// A tab dragged out of the window and let go of: a window of its own,
     /// where it was dropped and the size of this one, with the page as it
     /// was — the same web view, not loaded again.
-    func tearOff(_ tab: Tab, at point: NSPoint) {
+    func tearOff(_ tab: Tab, at point: NSPoint, frame: NSRect? = nil) {
         guard !isPrivate, tabs.count > 1, tabs.contains(where: { $0.id == tab.id }),
               let open = Browser.openTorn
         else { return }
@@ -1236,7 +1236,7 @@ final class Browser: NSObject, ObservableObject {
         }
         tabs.removeAll { $0.id == tab.id }
         chosen.remove(tab.id)
-        Browser.handoffs[tab.id] = Handoff(tab: tab, frame: tornFrame(at: point))
+        Browser.handoffs[tab.id] = Handoff(tab: tab, frame: frame ?? tornFrame(at: point))
         open(tab.id)
         writeSession()
     }
@@ -1260,6 +1260,12 @@ final class Browser: NSObject, ObservableObject {
     /// same hand, and the drag goes on putting it in its place — as Arc and
     /// Dia do.
     @Published var heldOut: Tab.ID?
+    /// The tab under the pointer in the row or the column, for the middle
+    /// button: it closes the tab it is pressed on, as everywhere else.
+    var pointed: Tab.ID?
+    func point(at tab: Tab, _ over: Bool) {
+        if over { pointed = tab.id } else if pointed == tab.id { pointed = nil }
+    }
     private lazy var preview = TearPreview()
 
     /// Asked on every step of a tab's drag. True while the tab is held
@@ -1475,7 +1481,7 @@ final class Browser: NSObject, ObservableObject {
     /// The session as it stands, gathered here and written by Session's own
     /// queue — not here on the main thread, which every pin, move and
     /// profile switch used to wait on (2 Oct 2026). `now` waits for it.
-    private func writeSession(now: Bool = false) {
+    func writeSession(now: Bool = false) {
         // A private window is in no session: nothing of it comes back.
         guard !isPrivate else { return }
         // A torn window's tabs are the main window's to write.
@@ -1504,7 +1510,7 @@ final class Browser: NSObject, ObservableObject {
         Session.write(now: now, .init(profiles: spaces, current: profile))
     }
 
-    private func rememberSession() {
+    func rememberSession() {
         guard !remembering else { return }
         remembering = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
@@ -2362,6 +2368,17 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             if flags.contains(.command) || action.buttonNumber == 2 {
                 open(url, foreground: flags.contains(.shift))
                 decisionHandler(.cancel)
+                return
+            }
+            // ⇧-click: a window of its own, as in Chrome. ⌥-click: the file
+            // the link points at, kept, as in Safari.
+            if flags.contains(.shift), !flags.contains(.option) {
+                openInNewWindow(url)
+                decisionHandler(.cancel)
+                return
+            }
+            if flags.contains(.option), !flags.contains(.shift) {
+                decisionHandler(.download)
                 return
             }
         }

@@ -71,6 +71,7 @@ struct TabBar: View {
                     }
                     .buttonStyle(.plain)
                     .onHover { plussed = $0 }
+                    .contextMenu { RecentlyClosed(browser: browser) }
                     .opacity(nearby ? 1 : 0)
                     .scaleEffect(nearby ? 1 : 0.7, anchor: .leading)
                     .allowsHitTesting(nearby)
@@ -396,18 +397,27 @@ struct Helm: View, Equatable {
             let back = !tab.isBlank && tab.canGoBack
             let forward = !tab.isBlank && tab.canGoForward
             HStack(spacing: 2) {
-                Door(icon: "chevron.left", help: "Back   ⌘[") { browser.back() }
-                    .disabled(!back)
-                    .opacity(back ? 1 : 0.3)
-                Door(icon: "chevron.right", help: "Forward   ⌘]") { browser.forward() }
-                    .disabled(!forward)
-                    .opacity(forward ? 1 : 0.3)
+                // Held, or right-clicked, each lists the pages that way;
+                // ⌘-click opens the next one beside this tab — Safari and
+                // Chrome both.
+                Door(icon: "chevron.left", help: "Back   ⌘[ — hold for history", hold: { browser.showHistory(back: true) }) {
+                    browser.step(back: true)
+                }
+                .disabled(!back)
+                .opacity(back ? 1 : 0.3)
+                .contextMenu { pages(back: true) }
+                Door(icon: "chevron.right", help: "Forward   ⌘] — hold for history", hold: { browser.showHistory(back: false) }) {
+                    browser.step(back: false)
+                }
+                .disabled(!forward)
+                .opacity(forward ? 1 : 0.3)
+                .contextMenu { pages(back: false) }
                 // Reload, or stop while it is still coming.
                 Door(
                     icon: tab.loading ? "xmark" : "arrow.clockwise",
                     help: tab.loading ? "Stop   ⌘." : "Reload   ⌘R"
                 ) {
-                    if tab.loading { tab.stop() } else { browser.reload() }
+                    if tab.loading { tab.stop() } else { browser.reloadClicked() }
                 }
                 .disabled(tab.isBlank)
                 .opacity(tab.isBlank ? 0.3 : 1)
@@ -415,6 +425,16 @@ struct Helm: View, Equatable {
             .animation(Motion.quick, value: back)
             .animation(Motion.quick, value: forward)
             .animation(Motion.quick, value: tab.loading)
+        }
+
+        /// The pages one way, nearest first, for the right-click menu.
+        @ViewBuilder
+        private func pages(back: Bool) -> some View {
+            ForEach(Array(browser.history(back: back).prefix(20).enumerated()), id: \.offset) { _, item in
+                Button(item.title?.isEmpty == false ? item.title! : Address.pretty(item.url)) {
+                    browser.go(to: item, beside: false)
+                }
+            }
         }
     }
 }
@@ -516,7 +536,7 @@ private struct TabPill: View, Equatable {
         // A tap with ⇧ down never reaches the gesture above on macOS — SwiftUI
         // keeps ⇧-clicks for its own lists — so the run is asked for here.
         .simultaneousGesture(TapGesture().modifiers(.shift).onEnded { _ = browser.choose(tab, with: .shift) })
-        .onHover { hovering = $0 }
+        .onHover { hovering = $0; browser.point(at: tab, $0) }
         .contextMenu { TabMenu(browser: browser, tab: tab, close: close) }
         .help(pinned || compact ? tab.label : "")
         .animation(Motion.quick, value: hovering)
@@ -810,9 +830,36 @@ struct TabMenu: View {
         Button(tab.muted ? "Unmute Tab" : "Mute Tab") { tab.toggleMute() }
             .disabled(tab.isBlank)
         Divider()
+        Button("Reload") { tab.reload() }
+            .disabled(tab.isBlank)
+        if !browser.isPrivate {
+            Button("Move to New Window") { browser.moveToNewWindow(tab) }
+                .disabled(browser.tabs.count < 2)
+        }
+        Divider()
         Button("Close Tab", action: close)
         Button("Close Other Tabs") { browser.closeOthers(but: tab) }
             .disabled(browser.tabs.count < 2)
+        Button(browser.prefs.sidebar ? "Close Tabs Below" : "Close Tabs to the Right") { browser.closeAfter(tab) }
+            .disabled(browser.tabs.last?.id == tab.id)
+    }
+}
+
+/// Right-click on the way to a new tab: the tabs closed lately, newest
+/// first, any of them back in one click — Safari's, from its + button.
+struct RecentlyClosed: View {
+    @ObservedObject var browser: Browser
+
+    var body: some View {
+        if browser.ghosts.isEmpty {
+            Text("No Recently Closed Tabs")
+        } else {
+            Section("Recently Closed") {
+                ForEach(browser.ghosts.reversed().prefix(12)) { ghost in
+                    Button(ghost.label) { browser.reopen(ghost) }
+                }
+            }
+        }
     }
 }
 

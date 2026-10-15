@@ -1213,6 +1213,7 @@ final class PageView: WKWebView {
     /// What extensions added to the right-click menu, at the end of it.
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
+        offerWindow(in: menu)
         guard #available(macOS 15.4, *),
               let tab = Extensions.shared.browser?.tabs.first(where: { $0.built === self })
         else { return }
@@ -1220,6 +1221,26 @@ final class PageView: WKWebView {
         guard !items.isEmpty else { return }
         menu.addItem(.separator())
         items.forEach { menu.addItem($0) }
+    }
+
+    /// WebKit's "Open Link in New Window" opens a tab here, so it is called
+    /// that; and beside it, one that does open a window — Chrome's pair.
+    /// The link is the one under the pointer, which the page has already
+    /// said (see `hovered`).
+    private func offerWindow(in menu: NSMenu) {
+        let mine = NSUserInterfaceItemIdentifier("WKMenuItemIdentifierOpenLinkInNewWindow")
+        guard let index = menu.items.firstIndex(where: { $0.identifier == mine }) else { return }
+        menu.items[index].title = "Open Link in New Tab"
+        guard let owner = Browser.every.allObjects.first(where: { $0.tabs.contains { $0.built === self } }),
+              !owner.isPrivate,
+              let link = owner.tabs.first(where: { $0.built === self })?.hovered,
+              let url = URL(string: link), ["http", "https"].contains(url.scheme ?? "")
+        else { return }
+        let hand = MenuHand { [weak owner] in owner?.openInNewWindow(url) }
+        let item = NSMenuItem(title: "Open Link in New Window", action: #selector(MenuHand.fire(_:)), keyEquivalent: "")
+        item.target = hand
+        item.representedObject = hand
+        menu.insertItem(item, at: index + 1)
     }
 
     /// Told where a sideways swipe has got to, and nil when there is none.

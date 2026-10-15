@@ -128,7 +128,7 @@ struct Chord: Hashable {
 @MainActor
 final class Keys: ObservableObject {
     enum Command: String, CaseIterable, Identifiable {
-        case newTab, newPrivateTab, reopenTab, closeTab, closeOthers, duplicate, pinTab
+        case newTab, newWindow, newPrivateTab, reopenTab, closeTab, closeOthers, duplicate, pinTab
         case address, switchTab, tabNumber, nextTab, previousTab, recentTab, recentTabBack
         case back, forward, reload, hardReload, findOnPage, findNext, findPrevious, print
         case copyAddress, pasteAndGo, bookmark, bookmarks, history, downloads, muteTab
@@ -141,6 +141,7 @@ final class Keys: ObservableObject {
         var title: String {
             switch self {
             case .newTab: return "New tab"
+            case .newWindow: return "New window"
             case .newPrivateTab: return "New private window"
             case .reopenTab: return "Reopen closed tab"
             case .closeTab: return "Close tab"
@@ -194,6 +195,7 @@ final class Keys: ObservableObject {
         var fallback: String? {
             switch self {
             case .newTab: return "cmd+t"
+            case .newWindow: return "cmd+n"
             case .newPrivateTab: return "shift+cmd+n"
             case .reopenTab: return "shift+cmd+t"
             case .closeTab: return "cmd+w"
@@ -268,7 +270,7 @@ final class Keys: ObservableObject {
         }
 
         static let groups: [(String, [Command])] = [
-            ("Tabs", [.newTab, .newPrivateTab, .closeTab, .reopenTab, .closeOthers, .duplicate, .pinTab, .muteTab]),
+            ("Tabs", [.newTab, .newWindow, .newPrivateTab, .closeTab, .reopenTab, .closeOthers, .duplicate, .pinTab, .muteTab]),
             ("Getting around", [.address, .switchTab, .tabNumber, .nextTab, .previousTab, .recentTab, .recentTabBack, .back, .forward]),
             ("The page", [.reload, .hardReload, .findOnPage, .findNext, .findPrevious, .readingMode, .floatVideo,
                           .hideElements, .hiddenHere, .zoomIn, .zoomOut, .actualSize, .print, .copyAddress, .pasteAndGo, .inspector]),
