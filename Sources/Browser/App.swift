@@ -826,11 +826,7 @@ struct ContentView: View {
                 browser.placing = nil
                 // A turn later: SwiftUI puts a new window where it likes once
                 // it is shown, over whatever was set before.
-                DispatchQueue.main.async {
-                    // Unless the pointer has the window already.
-                    guard !Browser.carried else { return }
-                    window.setFrame(frame, display: true)
-                }
+                DispatchQueue.main.async { window.setFrame(frame, display: true) }
             }
         } else {
             Links.window = window

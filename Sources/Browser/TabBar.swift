@@ -235,6 +235,7 @@ private struct TabRun: View {
                         // The held pill keeps up with the hand; the others make
                         // way for it.
                         .offset(x: held ? travel : aside(index))
+                        .opacity(browser.heldOut == tab.id ? 0 : 1)
                         .zIndex(held ? 1 : 0)
                         .shadow(color: .black.opacity(held ? 0.14 : 0), radius: 12, y: 4)
                         // Ahead of the run's own scrolling. A click without
@@ -301,15 +302,6 @@ private struct TabRun: View {
         // In the row's space, not the pill's — see the sidebar's grid for why.
         DragGesture(minimumDistance: 5, coordinateSpace: .named("strip"))
             .onChanged { value in
-                // Pulled clear of the row: out it comes at once, in a window
-                // of its own that follows the pointer from here.
-                guard browser.tabs.contains(where: { $0.id == tab.id }) else { return }
-                if browser.pulledOut() {
-                    dragging = nil
-                    travel = 0
-                    browser.tearOff(tab, at: NSEvent.mouseLocation, following: true)
-                    return
-                }
                 if dragging != tab.id {
                     dragging = tab.id
                     from = index
@@ -321,6 +313,13 @@ private struct TabRun: View {
                 let pinned = browser.pinnedCount
                 let low = tab.pin != nil ? 0 : pinned
                 let high = tab.pin != nil ? max(0, pinned - 1) : browser.tabs.count - 1
+                // Held out below the strip: its preview follows the pointer and
+                // the pills close up behind it. Back on the strip, it is a pill
+                // under the hand again and this goes on placing it.
+                if browser.dragging(tab) {
+                    if target != high { withAnimation(Motion.settle) { target = high } }
+                    return
+                }
                 travel = min(max(CGFloat(low - from) * step, value.translation.width), CGFloat(high - from) * step)
                 let wanted = min(max(low, from + Int((travel / step).rounded())), high)
                 if wanted != target {
@@ -328,12 +327,10 @@ private struct TabRun: View {
                 }
             }
             .onEnded { _ in
-                guard browser.tabs.contains(where: { $0.id == tab.id }) else { return }
-                // Let go of outside the window: a window of its own.
-                if let window = browser.window, !window.frame.contains(NSEvent.mouseLocation), browser.tabs.count > 1 {
+                // Let go of while held out: a window of its own.
+                if browser.letGo(tab) {
                     dragging = nil
                     travel = 0
-                    browser.tearOff(tab, at: NSEvent.mouseLocation)
                     return
                 }
                 // One move and the return of every offset in the same breath:

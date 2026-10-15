@@ -1224,61 +1224,70 @@ final class Browser: NSObject, ObservableObject {
     /// A tab dragged out of the window and let go of: a window of its own,
     /// where it was dropped and the size of this one, with the page as it
     /// was — the same web view, not loaded again.
-    func tearOff(_ tab: Tab, at point: NSPoint, following: Bool = false) {
+    func tearOff(_ tab: Tab, at point: NSPoint) {
         guard !isPrivate, tabs.count > 1, tabs.contains(where: { $0.id == tab.id }),
               let open = Browser.openTorn
         else { return }
         if floating == tab.id { land() }
-        let place = tabs.firstIndex { $0.id == tab.id } ?? tabs.count
         if activeID == tab.id {
-            let index = place
+            let index = tabs.firstIndex { $0.id == tab.id } ?? 0
             let rest = tabs.filter { $0.id != tab.id }
             select(rest[min(index, rest.count - 1)])
         }
         tabs.removeAll { $0.id == tab.id }
         chosen.remove(tab.id)
+        Browser.handoffs[tab.id] = Handoff(tab: tab, frame: tornFrame(at: point))
+        open(tab.id)
+        writeSession()
+    }
+
+    /// Where a window torn off at `point` goes: the size of this one, with
+    /// the pointer on the tab in it — its row in the column, or its pill in
+    /// the strip.
+    func tornFrame(at point: NSPoint) -> NSRect {
         let size = window?.frame.size ?? NSSize(width: 1180, height: 780)
-        // The pointer lands on the tab in the new window: its row in the
-        // column, or its pill in the strip.
         let grip = prefs.sidebar
             ? NSPoint(x: 70, y: Metrics.strip + 17)
             : NSPoint(x: Metrics.lights + 60, y: Metrics.strip / 2)
-        Browser.handoffs[tab.id] = Handoff(
-            tab: tab,
-            frame: NSRect(x: point.x - grip.x, y: point.y + grip.y - size.height, width: size.width, height: size.height)
-        )
-        open(tab.id)
-        if following { Browser.carry(tab, from: self, at: place, grip: grip) }
-        writeSession()
+        return NSRect(x: point.x - grip.x, y: point.y + grip.y - size.height, width: size.width, height: size.height)
     }
 
-    /// Over the column or the strip — where a tab held out can be put back.
-    func overRow() -> Bool {
-        guard let window, let content = window.contentView else { return false }
-        let at = window.mouseLocationOutsideOfEventStream
-        guard content.bounds.contains(at) else { return false }
-        if prefs.sidebar { return at.x <= prefs.sideWidth }
-        return content.bounds.height - at.y <= Metrics.strip
+    // MARK: - a tab held out of the window
+
+    /// The tab held out past the row, still in it but out of sight, while
+    /// its preview follows the pointer. Let go of there, it gets a window
+    /// of its own; brought back over the row, it is a row again, under the
+    /// same hand, and the drag goes on putting it in its place — as Arc and
+    /// Dia do.
+    @Published var heldOut: Tab.ID?
+    private lazy var preview = TearPreview()
+
+    /// Asked on every step of a tab's drag. True while the tab is held
+    /// out, when the row should leave it alone.
+    func dragging(_ tab: Tab) -> Bool {
+        let at = NSEvent.mouseLocation
+        if heldOut == tab.id {
+            if overRow() {
+                heldOut = nil
+                preview.hide()
+                return false
+            }
+            preview.move(to: tornFrame(at: at))
+            return true
+        }
+        guard pulledOut() else { return false }
+        heldOut = tab.id
+        preview.show(tab, sidebar: prefs.sidebar ? prefs.sideWidth : nil, frame: tornFrame(at: at))
+        return true
     }
 
-    /// A torn window giving its tab back while it is still held: the window
-    /// goes, the tab does not.
-    private func giveBack() -> Tab? {
-        guard isTorn, let tab = tabs.first else { return nil }
-        if floating == tab.id { land() }
-        tabs = []
-        activeID = nil
-        window?.close()
-        return tab
-    }
-
-    /// A tab brought home before it was let go of: back where it came from,
-    /// in front, with its page as it was.
-    private func takeBack(_ tab: Tab, at index: Int) {
-        prepare(tab)
-        tabs.insert(tab, at: min(max(0, index), tabs.count))
-        select(tab)
-        writeSession()
+    /// The drag is over. True when the tab went into a window of its own.
+    func letGo(_ tab: Tab) -> Bool {
+        guard heldOut == tab.id else { return false }
+        heldOut = nil
+        preview.hide()
+        tearOff(tab, at: NSEvent.mouseLocation)
+        return true
     }
 
     /// Whether a held tab has been pulled far enough from its row to come
@@ -1292,40 +1301,13 @@ final class Browser: NSObject, ObservableObject {
         return content.bounds.height - at.y > Metrics.strip + 50
     }
 
-    /// The window just torn off rides with the pointer until the button is
-    /// let go of. Brought back over the column or the strip first, the
-    /// window goes and the tab is home again; pulled out again, out it
-    /// comes again. The drag still belongs to the window it started in, so
-    /// its events are watched here rather than in the new one.
-    private static var carrying: Any?
-    static var carried: Bool { carrying != nil }
-    private static func carry(_ tab: Tab, from home: Browser, at index: Int, grip: NSPoint) {
-        if let carrying { NSEvent.removeMonitor(carrying) }
-        var out = true
-        carrying = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak home, weak tab] event in
-            guard let home, let tab else { return event }
-            let torn = Browser.every.allObjects.first { $0.isTorn && $0.tabs.contains { $0.id == tab.id } }
-            let at = NSEvent.mouseLocation
-            if out {
-                if let torn, let window = torn.window {
-                    window.setFrameTopLeftPoint(NSPoint(x: at.x - grip.x, y: at.y + grip.y))
-                    // Back over where it came from: home it goes.
-                    if event.type == .leftMouseDragged, home.overRow(), torn.giveBack() != nil {
-                        home.takeBack(tab, at: index)
-                        out = false
-                    }
-                }
-            } else if event.type == .leftMouseDragged, home.pulledOut() {
-                home.tearOff(tab, at: at)
-                out = true
-            }
-            if event.type == .leftMouseUp {
-                if let carrying = Browser.carrying { NSEvent.removeMonitor(carrying) }
-                Browser.carrying = nil
-                if out, let window = torn?.window { Browser.bringForward(window) }
-            }
-            return event
-        }
+    /// Over the column or the strip — where a tab held out can be put back.
+    func overRow() -> Bool {
+        guard let window, let content = window.contentView else { return false }
+        let at = window.mouseLocationOutsideOfEventStream
+        guard content.bounds.contains(at) else { return false }
+        if prefs.sidebar { return at.x <= prefs.sideWidth }
+        return content.bounds.height - at.y <= Metrics.strip
     }
 
     /// The few settings that something else has to be told about. The rest are
