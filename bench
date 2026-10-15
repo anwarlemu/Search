@@ -8,6 +8,7 @@
     ./bench sleep ID                   put a tab to sleep now, or say what keeps it awake
     ./bench select ID                  bring a tab to the front — --test runs only
     ./bench tear ID                    a tab out into a window of its own — --test runs only
+    ./bench give ID                    a tab dropped on the other window's tabs — --test runs only
     ./bench resize W H [STEPS]         take the window to W×H in steps, like a drag — --test runs only
     ./bench key ID TEXT                press keys on a tab as real key events — --test runs only
     ./bench press KEY [MODS] [--hold]  a shortcut through the app's event queue, MODS like cmd,shift; --hold keeps
@@ -99,7 +100,7 @@ def main(argv):
         if not args: sys.exit("usage: bench wait ID [SECONDS]")
         request["id"] = args[0]
         if len(args) > 1: request["seconds"] = float(args[1])
-    elif verb in ("text", "close", "sleep", "select", "tear"):
+    elif verb in ("text", "close", "sleep", "select", "tear", "give"):
         if len(args) != 1: sys.exit(f"usage: bench {verb} ID")
         request["id"] = args[0]
     elif verb == "eval":

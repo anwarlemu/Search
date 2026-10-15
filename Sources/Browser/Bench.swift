@@ -335,6 +335,27 @@ final class Bench {
                 answer(["windows": torn.count, "left": browser.tabs.count, "torn": torn.flatMap(\.tabs).map(Bench.short)])
             }
 
+        case "give":
+            // A tab dropped on another window's row: from a torn window to
+            // the main one, or from the main one to a torn one. --test only.
+            guard Store.testing else { answer(["error": "give only works on a --test run"]); return }
+            let wanted = (request["id"] as? String ?? "").lowercased()
+            guard let owner = Browser.every.allObjects.first(where: { $0.tabs.contains { Bench.short($0).hasPrefix(wanted) } }),
+                  let tab = owner.tabs.first(where: { Bench.short($0).hasPrefix(wanted) }),
+                  let other = Browser.every.allObjects.first(where: { $0 !== owner && !$0.isPrivate && $0.window != nil }),
+                  let frame = other.window?.frame
+            else { answer(["error": "no tab or no other window"]); return }
+            // Over the top of its column, or its strip.
+            owner.give(tab, to: other, at: NSPoint(x: frame.minX + 60, y: frame.maxY - Metrics.strip - 20))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                let torn = Browser.every.allObjects.filter(\.isTorn)
+                answer([
+                    "main": Browser.main?.tabs.map(Bench.short) ?? [],
+                    "mainShowing": Browser.main?.window?.isVisible ?? false,
+                    "torn": torn.map { $0.tabs.map(Bench.short) },
+                ])
+            }
+
         case "text":
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             house(tab)
@@ -741,7 +762,7 @@ final class Bench {
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
                 "tabs", "open", "go", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "ui",
-                "key", "press", "tear", "mouse", "resize", "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload",
+                "key", "press", "tear", "give", "mouse", "resize", "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload",
                 "ext-page", "ext-popup", "ext-menu", "ext-pin", "ext-shot", "ext-answer", "ext-enable",
             ]])
         }

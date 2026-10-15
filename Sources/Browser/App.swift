@@ -830,6 +830,12 @@ struct ContentView: View {
             }
         } else {
             Links.window = window
+            // Put away when its last tab went to another window: back on
+            // screen, it has a tab to show again.
+            let browser = browser
+            NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { _ in
+                MainActor.assumeIsolated { browser.ensureTab() }
+            }
         }
         // Light or dark is the app's to say (Settings › Appearance); the
         // window only has to be the ground colour that goes with it.

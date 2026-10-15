@@ -1265,6 +1265,9 @@ final class Browser: NSObject, ObservableObject {
     /// Asked on every step of a tab's drag. True while the tab is held
     /// out, when the row should leave it alone.
     func dragging(_ tab: Tab) -> Bool {
+        // A private tab's page lives in the private window's own store, and
+        // nowhere else.
+        guard !isPrivate else { return false }
         let at = NSEvent.mouseLocation
         if heldOut == tab.id {
             if overRow() {
@@ -1272,22 +1275,86 @@ final class Browser: NSObject, ObservableObject {
                 preview.hide()
                 return false
             }
-            preview.move(to: tornFrame(at: at))
+            // Over another window's row the card makes way: the tab is
+            // going in there, not into a window of its own.
+            preview.over(nil == Browser.landing(at: at, from: self), frame: tornFrame(at: at))
             return true
         }
-        guard pulledOut() else { return false }
+        // The only tab in a window comes out only to go into another one.
+        guard pulledOut() || (tabs.count == 1 && Browser.landing(at: at, from: self) != nil) else { return false }
         heldOut = tab.id
         preview.show(tab, sidebar: prefs.sidebar ? prefs.sideWidth : nil, frame: tornFrame(at: at))
+        preview.over(Browser.landing(at: at, from: self) == nil, frame: tornFrame(at: at))
         return true
     }
 
-    /// The drag is over. True when the tab went into a window of its own.
+    /// The drag is over. True when the tab left this window — into a window
+    /// of its own, or into another window's row.
     func letGo(_ tab: Tab) -> Bool {
         guard heldOut == tab.id else { return false }
         heldOut = nil
         preview.hide()
-        tearOff(tab, at: NSEvent.mouseLocation)
+        let at = NSEvent.mouseLocation
+        if let other = Browser.landing(at: at, from: self) {
+            give(tab, to: other, at: at)
+            return true
+        }
+        guard tabs.count > 1 else { return false }
+        tearOff(tab, at: at)
         return true
+    }
+
+    /// Another window, not private, whose column or strip is under `point`.
+    static func landing(at point: NSPoint, from: Browser) -> Browser? {
+        every.allObjects.first { other in
+            other !== from && !other.isPrivate && other.window?.isVisible == true && other.overRow(at: point)
+        }
+    }
+
+    /// The tab out of this window and into `other`, where it was let go of
+    /// over its row. A window left with nothing in it goes.
+    func give(_ tab: Tab, to other: Browser, at point: NSPoint) {
+        if floating == tab.id { land() }
+        let last = tabs.count == 1
+        if !last, activeID == tab.id {
+            let index = tabs.firstIndex { $0.id == tab.id } ?? 0
+            let rest = tabs.filter { $0.id != tab.id }
+            select(rest[min(index, rest.count - 1)])
+        }
+        tabs.removeAll { $0.id == tab.id }
+        chosen.remove(tab.id)
+
+        other.prepare(tab)
+        var index = other.tabs.count
+        if other.prefs.sidebar, let window = other.window, let content = window.contentView {
+            let inside = window.convertPoint(fromScreen: point)
+            index = other.pinnedCount + SideBar.looseIndex(at: content.bounds.height - inside.y, in: other)
+        }
+        other.tabs.insert(tab, at: min(index, other.tabs.count))
+        other.select(tab)
+        if let window = other.window { Browser.bringForward(window) }
+
+        if last {
+            activeID = nil
+            if isTorn {
+                window?.close()
+            } else {
+                // The main window keeps its browser, and the session with
+                // it; it is put away, and given a fresh tab when it comes
+                // back.
+                window?.orderOut(nil)
+            }
+        }
+        writeSession()
+        other.writeSession()
+    }
+
+    /// The main window back on screen after its last tab was moved out.
+    func ensureTab() {
+        guard tabs.isEmpty else { return }
+        let tab = freshTab()
+        adopt(tab)
+        select(tab)
     }
 
     /// Whether a held tab has been pulled far enough from its row to come
@@ -1302,9 +1369,9 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// Over the column or the strip — where a tab held out can be put back.
-    func overRow() -> Bool {
+    func overRow(at point: NSPoint? = nil) -> Bool {
         guard let window, let content = window.contentView else { return false }
-        let at = window.mouseLocationOutsideOfEventStream
+        let at = point.map { window.convertPoint(fromScreen: $0) } ?? window.mouseLocationOutsideOfEventStream
         guard content.bounds.contains(at) else { return false }
         if prefs.sidebar { return at.x <= prefs.sideWidth }
         return content.bounds.height - at.y <= Metrics.strip

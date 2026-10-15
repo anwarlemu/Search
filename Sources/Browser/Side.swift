@@ -217,6 +217,20 @@ struct SideBar: View {
         max(3, (count + 1) / 2)
     }
 
+    /// Where among a column's loose rows a tab dropped this far from the top
+    /// of the window goes — worked out the way the column is drawn, without
+    /// the column to ask: a tab let go of over another window's column.
+    static func looseIndex(at fromTop: CGFloat, in browser: Browser) -> Int {
+        let pins = browser.pinnedCount
+        let cols = pinColumns(pins)
+        let wide = max(20, (browser.prefs.sideWidth - 20 - CGFloat(cols - 1) * pinGap) / CGFloat(cols))
+        let tall = min(square, wide)
+        let rows = pins == 0 ? 0 : (pins + cols - 1) / cols
+        let block = rows == 0 ? 0 : CGFloat(rows) * tall + CGFloat(rows - 1) * pinGap + 10
+        let into = (fromTop - Metrics.strip - block) / (row + gap)
+        return min(max(0, Int(into.rounded())), browser.tabs.count - pins)
+    }
+
     /// However many columns the count calls for, they split the row's own
     /// width between them — the row is what fills edge to edge, not each
     /// cell on its own, so this grows past 34 just as readily as it shrinks

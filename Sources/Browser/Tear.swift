@@ -46,6 +46,20 @@ final class TearPreview {
         panel?.setFrameOrigin(frame.origin)
     }
 
+    /// Following the pointer, and seen only where a window would open — not
+    /// over another window's row, where the tab goes in among its tabs.
+    func over(_ open: Bool, frame: NSRect) {
+        guard let panel else { return }
+        panel.setFrameOrigin(frame.origin)
+        let alpha: CGFloat = open ? 0.94 : 0
+        guard panel.alphaValue != alpha else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.12
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = alpha
+        }
+    }
+
     func hide() {
         panel?.orderOut(nil)
         picture.image = nil
