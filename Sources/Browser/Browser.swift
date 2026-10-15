@@ -1040,7 +1040,10 @@ final class Browser: NSObject, ObservableObject {
                 MainActor.assumeIsolated { answer((playing as? Bool) ?? true) }
             }
         }
-        floater.onClose = { [weak self] in self?.land(pausing: true) }
+        // The × puts the little window away and nothing else: the video goes
+        // back to its tab still playing. The window's own pause button is
+        // there for stopping it (15 Oct 2026).
+        floater.onClose = { [weak self] in self?.land() }
 
         // Yesterday's tabs, or one empty one. Either way a web view is built
         // now, which starts a content process while the window is still being
@@ -1139,7 +1142,7 @@ final class Browser: NSObject, ObservableObject {
         bookmarks.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         prefs.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         keys.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
-        floater.onClose = { [weak self] in self?.land(pausing: true) }
+        floater.onClose = { [weak self] in self?.land() }
         floater.onReturn = { [weak self] in
             guard let self else { return }
             let came = floating
@@ -1717,8 +1720,8 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// Back into its tab. The stage takes the page again on its next layout,
-    /// which is what the self-healing there is for. `pausing` is the little
-    /// window's ×, which stops the video as well as closing.
+    /// which is what the self-healing there is for. `pausing` stops the video
+    /// as well.
     func land(pausing: Bool = false) {
         // The window closes whatever else is true. Tying that to the bookkeeping
         // is how a little window outlives the thing that opened it.
