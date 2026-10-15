@@ -100,9 +100,10 @@ final class Float {
             ),
             on: screen
         )
+        let corner = Float.corner(for: spot, velocity: .zero, on: screen)
 
         let panel = Panel(
-            contentRect: spot,
+            contentRect: corner,
             styleMask: [.borderless, .resizable, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -123,10 +124,12 @@ final class Float {
         panel.aspectRatio = size
         panel.minSize = NSSize(width: 260, height: 146)
 
-        let ground = NSView(frame: NSRect(origin: .zero, size: spot.size))
+        let ground = NSView(frame: NSRect(origin: .zero, size: corner.size))
         ground.wantsLayer = true
         ground.layer?.backgroundColor = NSColor.black.cgColor
-        ground.layer?.cornerRadius = 14
+        // The Mac's own picture-in-picture: a tighter corner than a window's.
+        ground.layer?.cornerRadius = 10
+        ground.layer?.cornerCurve = .continuous
         ground.layer?.masksToBounds = true
 
         // WebKit puts its own pinch recogniser on a web view, and a gesture
@@ -208,8 +211,38 @@ final class Float {
         let was = panel.frame
         let tall = was.width * height / width
         guard abs(tall - was.height) > 1 else { return }
-        let screen = NSScreen.main?.visibleFrame ?? was
-        panel.setFrame(Float.fit(NSRect(x: was.minX, y: was.minY, width: was.width, height: tall), on: screen), display: true)
+        let screen = Float.screen(of: was)
+        let fitted = Float.fit(NSRect(x: was.minX, y: was.minY, width: was.width, height: tall), on: screen)
+        panel.setFrame(Float.corner(for: fitted, velocity: .zero, on: screen), display: true)
+    }
+
+    // MARK: - corners
+
+    /// Space kept between the window and the screen's edge, as the Mac's own
+    /// picture-in-picture keeps it.
+    private static let margin: CGFloat = 16
+
+    /// The visible part of whichever display holds most of `frame`.
+    static func screen(of frame: NSRect) -> NSRect {
+        let middle = NSPoint(x: frame.midX, y: frame.midY)
+        return (NSScreen.screens.first { $0.frame.contains(middle) } ?? NSScreen.main)?.visibleFrame ?? frame
+    }
+
+    /// The corner a window let go of here lands in: the one nearest to where
+    /// it was heading, so a flick towards a corner reaches it from anywhere.
+    static func corner(for frame: NSRect, velocity: CGVector, on screen: NSRect) -> NSRect {
+        guard screen.width > 0 else { return frame }
+        // Where the throw would carry it — a short glide's worth.
+        let x = frame.midX + velocity.dx * 0.18
+        let y = frame.midY + velocity.dy * 0.18
+        let right = x > screen.midX
+        let top = y > screen.midY
+        return NSRect(
+            x: right ? screen.maxX - frame.width - margin : screen.minX + margin,
+            y: top ? screen.maxY - frame.height - margin : screen.minY + margin,
+            width: frame.width,
+            height: frame.height
+        )
     }
 
     /// Asks the page where it is, for the line and the pause button.
@@ -285,7 +318,7 @@ final class Float {
         var onNear: (() -> Void)?
 
         var playing = true {
-            didSet { pause.image = glyph(playing ? "pause.fill" : "play.fill", 17) }
+            didSet { pause.image = glyph(playing ? "pause.fill" : "play.fill", 26) }
         }
 
         /// Nought to one. Drawn as a hairline along the bottom edge.
@@ -323,7 +356,7 @@ final class Float {
         var captions: (available: Bool, on: Bool) = (false, false) {
             didSet {
                 cc.isHidden = !captions.available
-                cc.image = glyph(captions.on ? "captions.bubble.fill" : "captions.bubble", 13)
+                cc.image = glyph(captions.on ? "captions.bubble.fill" : "captions.bubble", 14)
                 needsLayout = true
             }
         }
@@ -346,24 +379,21 @@ final class Float {
             super.init(frame: frame)
             wantsLayer = true
 
-            // A wash at the top and bottom, so white buttons hold against a
-            // bright frame of film without covering it.
-            scrim.colors = [
-                NSColor(white: 0, alpha: 0.45).cgColor,
-                NSColor(white: 0, alpha: 0).cgColor,
-                NSColor(white: 0, alpha: 0).cgColor,
-                NSColor(white: 0, alpha: 0.5).cgColor,
-            ]
-            scrim.locations = [0, 0.28, 0.66, 1]
+            // The whole picture dimmed evenly under the pointer, as the Mac's
+            // own picture-in-picture does, so bare white glyphs hold against
+            // a bright frame of film.
+            scrim.colors = [NSColor(white: 0, alpha: 0.32).cgColor, NSColor(white: 0, alpha: 0.32).cgColor]
             scrim.opacity = 0
             layer?.addSublayer(scrim)
 
-            dress(close, "xmark", 11, round: 15, action: #selector(pressedClose))
-            dress(back, "arrow.up.forward", 12, round: 15, action: #selector(pressedReturn))
-            dress(rewind, "gobackward.15", 15, round: 19, action: #selector(pressedRewind))
-            dress(pause, "pause.fill", 17, round: 25, action: #selector(pressedPause))
-            dress(forward, "goforward.15", 15, round: 19, action: #selector(pressedForward))
-            dress(cc, "captions.bubble", 13, round: 15, action: #selector(pressedCaptions))
+            // Bare glyphs, no discs: close and back to the tab at the top left,
+            // the player in the middle — the Mac's own arrangement.
+            dress(close, "xmark", 13, action: #selector(pressedClose))
+            dress(back, "pip.exit", 14, action: #selector(pressedReturn))
+            dress(rewind, "gobackward.15", 19, action: #selector(pressedRewind))
+            dress(pause, "pause.fill", 26, action: #selector(pressedPause))
+            dress(forward, "goforward.15", 19, action: #selector(pressedForward))
+            dress(cc, "captions.bubble", 14, action: #selector(pressedCaptions))
             cc.isHidden = true
 
             // The chapter, as a small pill at the top. A click lists them all.
@@ -373,8 +403,8 @@ final class Float {
             heading.target = self
             heading.action = #selector(pressedChapter)
             heading.wantsLayer = true
-            heading.layer?.backgroundColor = NSColor(white: 0.1, alpha: 0.55).cgColor
-            heading.layer?.cornerRadius = 15
+            heading.layer?.backgroundColor = NSColor(white: 1, alpha: 0.16).cgColor
+            heading.layer?.cornerRadius = 11
             heading.isHidden = true
             addSubview(heading)
 
@@ -405,7 +435,6 @@ final class Float {
             _ button: NSButton,
             _ symbol: String,
             _ size: CGFloat,
-            round: CGFloat,
             action: Selector
         ) {
             button.image = glyph(symbol, size)
@@ -414,15 +443,12 @@ final class Float {
             button.imagePosition = .imageOnly
             button.target = self
             button.action = action
-            button.wantsLayer = true
-            button.layer?.backgroundColor = NSColor(white: 0.1, alpha: 0.55).cgColor
-            button.layer?.cornerRadius = round
             addSubview(button)
         }
 
         private func glyph(_ name: String, _ size: CGFloat) -> NSImage? {
             let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
-            let look = NSImage.SymbolConfiguration(pointSize: size, weight: .medium)
+            let look = NSImage.SymbolConfiguration(pointSize: size, weight: .semibold)
                 .applying(.init(paletteColors: [.white]))
             return image?.withSymbolConfiguration(look)
         }
@@ -434,22 +460,22 @@ final class Float {
             scrim.frame = bounds
             CATransaction.commit()
 
-            close.frame = NSRect(x: 14, y: bounds.height - 44, width: 30, height: 30)
-            back.frame = NSRect(x: bounds.width - 44, y: bounds.height - 44, width: 30, height: 30)
+            let top = bounds.height - 36
+            close.frame = NSRect(x: 8, y: top, width: 28, height: 28)
+            back.frame = NSRect(x: 38, y: top, width: 28, height: 28)
+            cc.frame = NSRect(x: bounds.width - 36, y: top, width: 28, height: 28)
 
-            cc.frame = NSRect(x: bounds.width - 44 - 36, y: bounds.height - 44, width: 30, height: 30)
-
-            let middle = bounds.midY - 25
-            pause.frame = NSRect(x: bounds.midX - 25, y: middle, width: 50, height: 50)
-            rewind.frame = NSRect(x: bounds.midX - 25 - 54, y: middle + 6, width: 38, height: 38)
-            forward.frame = NSRect(x: bounds.midX + 25 + 16, y: middle + 6, width: 38, height: 38)
+            let middle = bounds.midY - 22
+            pause.frame = NSRect(x: bounds.midX - 22, y: middle, width: 44, height: 44)
+            rewind.frame = NSRect(x: bounds.midX - 22 - 56, y: middle + 4, width: 36, height: 36)
+            forward.frame = NSRect(x: bounds.midX + 22 + 20, y: middle + 4, width: 36, height: 36)
 
             // The chapter between the buttons at the top, no wider than the
             // room between them.
-            let room = bounds.width - 2 * 58 - (cc.isHidden ? 0 : 36)
-            let asked = heading.attributedTitle.size().width + 24
+            let room = bounds.width - 2 * 76
+            let asked = heading.attributedTitle.size().width + 20
             let wide = min(max(60, asked), max(60, room))
-            heading.frame = NSRect(x: (bounds.width - wide) / 2 - (cc.isHidden ? 0 : 18), y: bounds.height - 44, width: wide, height: 30)
+            heading.frame = NSRect(x: (bounds.width - wide) / 2, y: top + 3, width: wide, height: 22)
 
             // The caption, sized with the window: readable small, not a
             // billboard large.
@@ -590,9 +616,57 @@ final class Float {
 
         override func mouseDown(with event: NSEvent) {
             guard let window else { return }
+            // Caught mid-glide, it stops where it is and is yours again.
+            halt()
             grab = NSEvent.mouseLocation
             origin = window.frame
             edges = edges(at: convert(event.locationInWindow, from: nil))
+            trail = [(event.timestamp, grab)]
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            settle(velocity: speed())
+            trail = []
+        }
+
+        // MARK: - into a corner
+
+        /// The last few places the pointer was while dragging, for how fast
+        /// and which way the window was thrown.
+        private var trail: [(time: TimeInterval, at: NSPoint)] = []
+
+        private func speed() -> CGVector {
+            guard let last = trail.last,
+                  let first = trail.first(where: { last.time - $0.time < 0.1 }),
+                  last.time - first.time > 0.005
+            else { return .zero }
+            let span = last.time - first.time
+            return CGVector(dx: (last.at.x - first.at.x) / span, dy: (last.at.y - first.at.y) / span)
+        }
+
+        /// Let go of, the window glides to the nearest corner, as the Mac's
+        /// own picture-in-picture does. Quick and ease-out: it answers the
+        /// hand at once and slows into place.
+        private func settle(velocity: CGVector) {
+            guard let window else { return }
+            let screen = Float.screen(of: window.frame)
+            let target = Float.corner(for: window.frame, velocity: velocity, on: screen)
+            guard target != window.frame else { return }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.28
+                context.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+                context.allowsImplicitAnimation = true
+                window.animator().setFrame(target, display: true)
+            }
+        }
+
+        /// A glide in progress, stopped where it has got to.
+        private func halt() {
+            guard let window else { return }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                window.animator().setFrame(window.frame, display: false)
+            }
         }
 
         override func mouseDragged(with event: NSEvent) {
@@ -600,6 +674,8 @@ final class Float {
             let now = NSEvent.mouseLocation
             let dx = now.x - grab.x
             let dy = now.y - grab.y
+            trail.append((event.timestamp, now))
+            if trail.count > 8 { trail.removeFirst(trail.count - 8) }
 
             guard edges.left || edges.right || edges.top || edges.bottom else {
                 window.setFrameOrigin(NSPoint(x: origin.minX + dx, y: origin.minY + dy))
@@ -641,10 +717,21 @@ final class Float {
             // Only while fingers are actually down. Letting the glide continue
             // would fling the pointer across the screen after them.
             guard event.momentumPhase == [] else { return }
+            if event.phase == .began { halt(); fling = [] }
+            // Fingers lifted: into the corner it was heading for.
+            if event.phase == .ended || event.phase == .cancelled {
+                let span = (fling.last?.time ?? 0) - (fling.first?.time ?? 0)
+                let moved = fling.reduce(CGVector.zero) { CGVector(dx: $0.dx + $1.by.dx, dy: $0.dy + $1.by.dy) }
+                settle(velocity: span > 0.005 ? CGVector(dx: moved.dx / span, dy: moved.dy / span) : .zero)
+                fling = []
+                return
+            }
 
             let dx = event.scrollingDeltaX
             let dy = event.scrollingDeltaY
             guard dx != 0 || dy != 0 else { return }
+            fling.append((event.timestamp, CGVector(dx: dx, dy: -dy)))
+            if fling.count > 6 { fling.removeFirst(fling.count - 6) }
 
             let spot = window.frame.origin
             window.setFrameOrigin(NSPoint(x: spot.x + dx, y: spot.y - dy))
@@ -664,6 +751,9 @@ final class Float {
             CGAssociateMouseAndMouseCursorPosition(1)
         }
 
+        /// The last few steps of a two-finger move, for the throw.
+        private var fling: [(time: TimeInterval, by: CGVector)] = []
+
         /// A pinch sizes it about the pointer: whatever is under your fingers
         /// stays under your fingers, and the rest grows away from it. Sizing
         /// about the centre instead makes the picture slide sideways under a
@@ -672,7 +762,8 @@ final class Float {
 
         override func magnify(with event: NSEvent) {
             guard let window else { return }
-            if event.phase == .began { pinching = 0 }
+            if event.phase == .began { pinching = 0; halt() }
+            if event.phase == .ended || event.phase == .cancelled { settle(velocity: .zero); return }
             pinching += event.magnification
 
             // Every event would mean a window resize, a web view relayout and a
