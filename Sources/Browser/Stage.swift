@@ -344,7 +344,7 @@ struct DragStrip: NSViewRepresentable {
         (view as? Strip)?.trailing = trailing
     }
 
-    private final class Strip: NSView {
+    fileprivate final class Strip: NSView {
         var reserved: CGFloat = 0
         var below: CGFloat = 0
         var trailing: CGFloat = 0
@@ -385,8 +385,12 @@ struct DragStrip: NSViewRepresentable {
         /// nothing at all.
         override func mouseUp(with event: NSEvent) {
             guard let window, !moved, event.clickCount == 2 else { return }
-            // System Settings › Desktop & Dock: what double-clicking a title
-            // bar should do. Unset means the default, which fills the screen.
+            Strip.doubleClicked(window)
+        }
+
+        /// System Settings › Desktop & Dock: what double-clicking a title
+        /// bar should do. Unset means the default, which fills the screen.
+        static func doubleClicked(_ window: NSWindow) {
             switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
             case "Minimize": window.miniaturize(nil)
             case "None": break
@@ -394,7 +398,7 @@ struct DragStrip: NSViewRepresentable {
             // would like to be, and a SwiftUI window answers with the size
             // it already is — so zoom(nil) did nothing at all. The whole
             // usable screen is what a browser window is being asked for.
-            default: Strip.fill(window)
+            default: fill(window)
             }
         }
 
@@ -441,4 +445,47 @@ final class RestingLights: NSView {
     /// Never in the way of a click: the real buttons are underneath, and they
     /// come back the moment the app does.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+/// Every empty spot of the frame is title bar: a drag on it moves the window,
+/// a double-click does what a title bar's does. Laid behind the column and
+/// the row, where anything drawn on top with its own gesture — a tab, a
+/// door — answers first, and only the gaps between them fall through to
+/// this. The strips above stay for the stretches SwiftUI draws nothing on
+/// (15 Oct 2026).
+struct WindowGrip: View {
+    @State private var grab: NSPoint?
+    @State private var origin = NSPoint.zero
+    @State private var held: NSWindow?
+
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 3, coordinateSpace: .global)
+                    .onChanged { _ in
+                        let now = NSEvent.mouseLocation
+                        if grab == nil {
+                            guard let window = NSApp.currentEvent?.window ?? NSApp.keyWindow else { return }
+                            held = window
+                            origin = window.frame.origin
+                            // Where the press was, not where the drag was
+                            // recognised three points later.
+                            grab = now
+                        }
+                        guard let grab, let held else { return }
+                        held.setFrameOrigin(NSPoint(x: origin.x + now.x - grab.x, y: origin.y + now.y - grab.y))
+                    }
+                    .onEnded { _ in
+                        grab = nil
+                        held = nil
+                    }
+            )
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded {
+                    guard let window = NSApp.currentEvent?.window ?? NSApp.keyWindow else { return }
+                    DragStrip.Strip.doubleClicked(window)
+                }
+            )
+    }
 }
