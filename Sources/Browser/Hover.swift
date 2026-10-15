@@ -104,7 +104,8 @@ final class HoverCard {
         let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        // Flat, like the rows it speaks for: no shadow lifting it off the page.
+        panel.hasShadow = false
         panel.ignoresMouseEvents = true
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = true
@@ -139,11 +140,11 @@ final class HoverCard {
                         .foregroundStyle(Palette.muted)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             .frame(width: 260, alignment: .leading)
-            .background(Palette.ground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.hairline, lineWidth: 1))
+            // The live tab's own grey and corner — no border, no shadow.
+            .background(Palette.wash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
     }
 }
