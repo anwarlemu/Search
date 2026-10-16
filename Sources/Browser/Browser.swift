@@ -1748,11 +1748,15 @@ final class Browser: NSObject, ObservableObject {
         tabs.remove(at: index)
         chosen.remove(tab.id)
         if activeID == tab.id {
-            // The neighbour on the right, or the last one if there is no
-            // right — through select(), same as everywhere else you land on
+            // The tab you were on before this one, the way ⌃Tab would take
+            // you back. Only when none of the rest has been looked at — a
+            // window just brought back, or nothing but tabs opened behind —
+            // the neighbour on the right, or the last one if there is no
+            // right. Through select(), same as everywhere else you land on
             // a tab, so one that was never built yet actually wakes up
             // instead of sitting there blank until a manual reload.
-            select(tabs[min(index, tabs.count - 1)])
+            let back = tabs.filter { $0.looked && !$0.bench }.max { $0.touched < $1.touched }
+            select(back ?? tabs[min(index, tabs.count - 1)])
         }
         rememberSession()
     }

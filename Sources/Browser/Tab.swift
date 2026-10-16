@@ -314,6 +314,11 @@ final class Tab: ObservableObject, Identifiable {
     /// what you were just reading is what you are most likely to want back.
     private(set) var touched = Date()
 
+    /// Whether you have looked at it at all. A tab opened behind the one on
+    /// screen has a fresh stamp from the moment it was made, but it was
+    /// never used, so closing a tab does not land you on it for that.
+    private(set) var looked = false
+
     /// Set on a tab brought back from the last session and not yet opened. It
     /// has a name and an address in the row, and costs nothing until you go to
     /// it — which is the difference between a browser that starts in half a
@@ -1061,7 +1066,10 @@ final class Tab: ObservableObject, Identifiable {
         adoptIcon()
     }
 
-    func touch() { touched = Date() }
+    func touch() {
+        touched = Date()
+        looked = true
+    }
 
     /// True when the web view holds nothing — never loaded, or emptied —
     /// while the tab still names a page. The white page, in other words.
