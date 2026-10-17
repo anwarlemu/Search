@@ -62,11 +62,10 @@ final class HoverCard {
         let panel = self.panel ?? make()
         self.panel = panel
         showing = tab
-        let face = Face(
-            title: tab.title.isEmpty ? tab.label : tab.title,
-            site: tab.address.map(Address.pretty) ?? "",
-            state: tab.muted ? "Muted" : tab.noisy ? "Playing sound" : tab.asleep ? "Asleep — opens again when you pick it" : nil
-        )
+        let title = tab.title.isEmpty ? tab.label : tab.title
+        let site = tab.address.map(Address.pretty) ?? ""
+        let state = tab.muted ? "Muted" : tab.noisy ? "Playing sound" : tab.asleep ? "Asleep — opens when picked" : nil
+        let face = Face(title: title, site: site, state: state, width: HoverCard.width(title: title, site: site, state: state))
         host?.rootView = face
         let size = host?.fittingSize ?? NSSize(width: 260, height: 54)
 
@@ -100,6 +99,19 @@ final class HoverCard {
         }
     }
 
+    /// As wide as its longest line wants, and no wider: a short title gets
+    /// a short card. Past 240 the title wraps and the site is cut in the
+    /// middle; under 120 the card would look like a scrap.
+    static func width(title: String, site: String, state: String?) -> CGFloat {
+        let lines: [(String, NSFont)] = [
+            (title, .systemFont(ofSize: 12.5, weight: .medium)),
+            (site, .systemFont(ofSize: 11.5)),
+            (state ?? "", .systemFont(ofSize: 11)),
+        ]
+        let widest = lines.map { ($0.0 as NSString).size(withAttributes: [.font: $0.1]).width }.max() ?? 0
+        return min(240, max(120, ceil(widest) + 20))
+    }
+
     private func make() -> NSPanel {
         let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         panel.isOpaque = false
@@ -109,7 +121,7 @@ final class HoverCard {
         panel.ignoresMouseEvents = true
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = true
-        let host = NSHostingView(rootView: Face(title: "", site: "", state: nil))
+        let host = NSHostingView(rootView: Face(title: "", site: "", state: nil, width: 120))
         panel.contentView = host
         self.host = host
         return panel
@@ -119,6 +131,7 @@ final class HoverCard {
         let title: String
         let site: String
         let state: String?
+        let width: CGFloat
 
         var body: some View {
             VStack(alignment: .leading, spacing: 3) {
@@ -142,7 +155,7 @@ final class HoverCard {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .frame(width: 260, alignment: .leading)
+            .frame(width: width, alignment: .leading)
             // The live tab's own grey and corner — no border, no shadow.
             .background(Palette.wash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
