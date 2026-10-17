@@ -77,6 +77,7 @@ final class Float {
 
     private var ticker: Timer?
     private var ticks = 0
+    private var beats = 0
     private var lastDuration: Double = -1
 
     var showing: Bool { panel != nil }
@@ -161,7 +162,11 @@ final class Float {
         }
         controls.onSkip = { [weak self] seconds in self?.onSkip?(seconds) }
         controls.onSeek = { [weak self] seconds in self?.onSeek?(seconds) }
-        controls.onCaptions = { [weak self] on in self?.onCaptions?(on) }
+        controls.onCaptions = { [weak self] on in
+            self?.onCaptions?(on)
+            // The player takes a moment to switch; asked again once it has.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self?.tick() }
+        }
         controls.onNear = { [weak self] in self?.tick() }
         ground.addSubview(controls)
         self.controls = controls
@@ -182,7 +187,7 @@ final class Float {
             }
         }
 
-        ticker = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        ticker = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
 
@@ -196,10 +201,18 @@ final class Float {
                     return
                 }
 
-                // The line and the caption are only drawn while the pointer
-                // is over the window; asked anyway, the page ran a script
-                // twice a second for nobody (2 Oct 2026).
-                if self.controls?.near == true { self.tick() }
+                // The line is only drawn while the pointer is over the
+                // window; asked anyway, the page ran a script for nobody
+                // (2 Oct 2026). Captions are drawn whether it is or not, so
+                // while they are on the page is asked four times a second
+                // — asked only under the pointer, a caption stayed on the
+                // screen, stale, from the moment the pointer left (17 Oct
+                // 2026). Off, it is asked every two seconds, in case they
+                // were turned on in the page.
+                self.beats += 1
+                let near = self.controls?.near == true
+                let captioned = self.controls?.captions.on == true
+                if near || captioned || self.beats % 8 == 0 { self.tick() }
             }
         }
     }
@@ -252,7 +265,8 @@ final class Float {
             controls.progress = state.through
             controls.playing = state.playing
             controls.time = state.time
-            controls.caption = state.caption
+            // Off is off: whatever the player last drew is not left behind.
+            controls.caption = state.captionsOn ? state.caption : ""
             controls.chapter = state.chapter
             controls.captions = (state.captions, state.captionsOn)
             // The list once at the start, again every ten seconds — a
@@ -260,7 +274,7 @@ final class Float {
             // the video changes under the window, as the next in a playlist
             // does.
             let changed = abs(state.duration - self.lastDuration) > 0.5
-            if self.ticks % 20 == 0 || changed {
+            if self.ticks % 40 == 0 || changed {
                 self.lastDuration = state.duration
                 self.onChapters? { list in self.controls?.chapters = list }
             }
@@ -550,6 +564,7 @@ final class Float {
 
         @objc private func pressedCaptions() {
             captions.on.toggle()
+            if !captions.on { caption = "" }
             onCaptions?(captions.on)
         }
 
