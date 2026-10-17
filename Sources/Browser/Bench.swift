@@ -320,18 +320,6 @@ final class Bench {
             browser.select(tab)
             answer(describe(tab))
 
-        case "away", "back":
-            // The window giving up the front, or getting it again — to another
-            // app, another window, the Dock — without taking anyone's screen.
-            guard Store.testing else {
-                answer(["error": "\(verb) only works on a --test run"])
-                return
-            }
-            if verb == "away" { browser.steppedAway() } else { browser.cameBack() }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                answer(["floating": browser.floating?.uuidString.prefix(8).lowercased() ?? "nothing"])
-            }
-
         case "tear":
             // A tab dragged out and let go of, without a hand: its own window,
             // near the middle of the screen. --test runs only, like select.

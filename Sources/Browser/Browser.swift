@@ -929,14 +929,7 @@ final class Browser: NSObject, ObservableObject {
     let isPrivate: Bool
     private let privateStore: WKWebsiteDataStore?
     /// The window this browser draws in, once there is one.
-    weak var window: NSWindow? {
-        didSet { if window !== oldValue { watchFront() } }
-    }
-    private var frontWatch: [NSObjectProtocol] = []
-    /// The little window opened because this one stopped being in front,
-    /// rather than by ⌘⇧P or a change of tab: it goes home when this window
-    /// is in front again.
-    private var liftedAway = false
+    weak var window: NSWindow?
 
     /// A tab for this window: an ordinary one, or one in the private store.
     func freshTab() -> Tab {
@@ -2005,43 +1998,6 @@ final class Browser: NSObject, ObservableObject {
         lift(active, quietly: true)
     }
 
-    /// Another app in front, another of our windows, or this one sent to
-    /// the Dock: a video playing here follows you out in the little window,
-    /// over whatever you went to — and comes home when this window is in
-    /// front again. Only a change of tab did it before (17 Oct 2026), so
-    /// switching to another app left the video behind the app.
-    private func watchFront() {
-        for token in frontWatch { NotificationCenter.default.removeObserver(token) }
-        frontWatch = []
-        guard let window else { return }
-        let center = NotificationCenter.default
-        for name in [NSWindow.didResignKeyNotification, NSWindow.didMiniaturizeNotification] {
-            frontWatch.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                // The next turn, once the key window has settled on its new owner.
-                DispatchQueue.main.async { MainActor.assumeIsolated { self?.steppedAway() } }
-            })
-        }
-        frontWatch.append(center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.cameBack() }
-        })
-    }
-
-    func steppedAway() {
-        guard let window, !Browser.quitting, !floater.showing, !window.isKeyWindow,
-              window.isVisible || window.isMiniaturized
-        else { return }
-        // Settings, a sheet, a panel of our own in front: still here.
-        if NSApp.isActive, !window.isMiniaturized, let key = NSApp.keyWindow,
-           !Browser.every.allObjects.contains(where: { $0.window === key })
-        { return }
-        lift(active, quietly: true, away: true)
-    }
-
-    func cameBack() {
-        guard liftedAway, let floating, floating == activeID else { return }
-        land()
-    }
-
     /// ⌘⇧P, for lifting one out by hand.
     func toggleFloat() {
         if floater.showing {
@@ -2053,7 +2009,7 @@ final class Browser: NSObject, ObservableObject {
 
     /// Everything but the video goes out of the way, and the page it lives in
     /// moves house — into a small window that stays above everything.
-    private func lift(_ tab: Tab?, quietly: Bool, away: Bool = false) {
+    private func lift(_ tab: Tab?, quietly: Bool) {
         // A tab just put down with ⌘W has no page to lift a video out of, and
         // asking it would only build an empty view to ask.
         guard let tab, !tab.isBlank, !tab.asleep, !floater.showing else { return }
@@ -2080,18 +2036,12 @@ final class Browser: NSObject, ObservableObject {
                 // the video is put back where it was rather than lifted out
                 // from under you, which left the stage blank (2 Oct 2026).
                 guard let web = tab.built, !tab.asleep, !self.floater.showing, self.floating == nil,
-                      !(quietly && !away && tab.id == self.activeID)
+                      !(quietly && tab.id == self.activeID)
                 else {
                     tab.built?.evaluateJavaScript(Isolate.off(pausing: false))
                     return
                 }
-                // Back in front before the page answered: it stays put.
-                if away, self.window?.isKeyWindow == true {
-                    tab.built?.evaluateJavaScript(Isolate.off(pausing: false))
-                    return
-                }
                 self.floating = tab.id
-                self.liftedAway = away
                 tab.floating = true
                 self.floater.lift(web)
             }
@@ -2105,7 +2055,6 @@ final class Browser: NSObject, ObservableObject {
         // The window closes whatever else is true. Tying that to the bookkeeping
         // is how a little window outlives the thing that opened it.
         if floater.showing { floater.drop() }
-        liftedAway = false
         guard let id = floating, let tab = tab(id) else { return }
         floating = nil
         tab.floating = false
