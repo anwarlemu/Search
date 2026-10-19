@@ -171,21 +171,48 @@ final class Float {
         ground.addSubview(controls)
         self.controls = controls
 
+        // On screen but unseen while the page re-lays itself out at its new
+        // size and the window takes the video's shape; then it fades in once,
+        // whole. Shown at once, it opened at 16:9 over a page still
+        // reflowing and jumped to the video's shape a moment later — the
+        // choppiness of 19 Oct 2026.
+        panel.alphaValue = 0
         panel.orderFrontRegardless()
         self.panel = panel
         ticks = 0
         lastDuration = -1
 
-        // The window takes the video's own shape once the page says what it
-        // is; 16:9 until then. A film in a 16:9 window is fine; a portrait
-        // clip or a 4:3 call in one was two bars and a small picture
-        // (2 Oct 2026).
-        (page as? WKWebView)?.evaluateJavaScript(Isolate.shape) { [weak self] answer, _ in
-            MainActor.assumeIsolated {
-                guard let pair = answer as? [Double], pair.count == 2 else { return }
-                self?.shape(width: pair[0], height: pair[1])
+        var shown = false
+        let reveal = { [weak self, weak panel] in
+            guard !shown, let panel, self?.panel === panel else { return }
+            shown = true
+            // A frame for WebKit to paint at the new size before anyone sees it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                guard self?.panel === panel else { return }
+                if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                    panel.alphaValue = 1
+                    return
+                }
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.18
+                    context.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+                    panel.animator().alphaValue = 1
+                }
             }
         }
+        // The window takes the video's own shape once the page says what it
+        // is; 16:9 if it doesn't say in time. A film in a 16:9 window is
+        // fine; a portrait clip or a 4:3 call in one was two bars and a
+        // small picture (2 Oct 2026).
+        (page as? WKWebView)?.evaluateJavaScript(Isolate.shape) { [weak self] answer, _ in
+            MainActor.assumeIsolated {
+                if let pair = answer as? [Double], pair.count == 2 {
+                    self?.shape(width: pair[0], height: pair[1])
+                }
+                reveal()
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { reveal() }
 
         ticker = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
