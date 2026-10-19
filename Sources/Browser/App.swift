@@ -509,7 +509,6 @@ struct ContentView: View {
                 // is not what the field is standing over, and dimming it along
                 // with the page says otherwise.
                 .padding(.leading, sidebar ? browser.prefs.sideWidth : 0)
-                .transition(.scale(scale: 0.97).combined(with: .opacity))
         }
     }
 
@@ -565,7 +564,10 @@ struct ContentView: View {
             .overlay(alignment: .bottom) { bars }
             .overlay { field }
             .overlay { panels }
-            .animation(Motion.settle, value: browser.fieldShowing)
+            // No animation on the field: ⌘L is pressed a hundred times a
+            // day, and a settle on it re-laid the whole window out for a
+            // third of a second each time — choppy over a heavy page, and
+            // late even when smooth (19 Oct 2026). It is simply there.
             .background(WindowSetup { window = $0; dress($0) })
             .onChange(of: browser.prefs.sidebar) { _, _ in
                 DispatchQueue.main.async { measureLights() }

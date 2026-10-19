@@ -22,7 +22,6 @@ struct Omnibox: View {
                         .fill(Palette.ground.opacity(0.74))
                         .ignoresSafeArea()
                         .onTapGesture { browser.dismiss() }
-                        .transition(.opacity)
                 }
                 VStack(spacing: 8) {
                     field
@@ -51,7 +50,8 @@ struct Omnibox: View {
                 .frame(width: min(Metrics.fieldWidth, max(120, geometry.size.width - 32)))
                 .padding(.bottom, min(60, geometry.size.height * 0.08))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .animation(Motion.settle, value: browser.offers)
+                // The list follows each keystroke as it is typed, with no
+                // settle to wait out; only a refused address moves.
                 .animation(Motion.settle, value: refused)
             }
         }
@@ -143,7 +143,6 @@ struct Omnibox: View {
                 .strokeBorder(Palette.hairline, lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.07), radius: 20, y: 6)
-        .transition(.scale(scale: 0.98, anchor: .top).combined(with: .opacity))
     }
 
     private struct Row: View {
