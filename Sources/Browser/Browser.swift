@@ -8,7 +8,17 @@ import Combine
 
 @MainActor
 final class Browser: NSObject, ObservableObject {
-    @Published private(set) var tabs: [Tab] = []
+    @Published private(set) var tabs: [Tab] = [] {
+        didSet {
+            // The pins come first, in their order, however a tab got in: a
+            // link opened from a pin lands next to it, and the column draws
+            // the pins as a block anyway — so ⌃2 counted a loose tab as the
+            // second pin (20 Oct 2026).
+            let pins = tabs.filter { $0.pin != nil }
+            guard tabs.prefix(pins.count).contains(where: { $0.pin == nil }) else { return }
+            tabs = pins + tabs.filter { $0.pin == nil }
+        }
+    }
     @Published var activeID: Tab.ID? {
         didSet {
             // The tab just left is the tab just looked at. Whether a tab has
