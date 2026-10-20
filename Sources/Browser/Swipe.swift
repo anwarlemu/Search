@@ -57,10 +57,18 @@ enum Swipe {
       }
 
       function taken(e) {
+        // A page that handles the wheel itself — a carousel moved by
+        // transform, a map, a canvas, a sheet — says so the way it says so
+        // to Chrome: by preventing the default.
+        if (e.defaultPrevented) return true;
         var el = e.target;
         if (el && el.nodeType !== 1) el = el.parentElement;
         while (el) {
           var root = el === document.documentElement || el === document.body;
+          // And one that has fenced its sideways overscroll off, anywhere
+          // under the fingers, means it to stay on the page.
+          var ob = getComputedStyle(el).overscrollBehaviorX;
+          if (ob === 'contain' || ob === 'none') return true;
           var can, left, max;
           if (root) {
             can = rootCanScroll();
@@ -80,12 +88,16 @@ enum Swipe {
         return false;
       }
 
+      // Heard first, read once the page's own handlers have all had the
+      // event — whether they prevented it is only known after.
       window.addEventListener('wheel', function (e) {
         if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
-        var t = taken(e), now = Date.now();
-        if (t === was && now - said < 100) return;
-        was = t; said = now;
-        window.webkit.messageHandlers.officeScroll.postMessage({ side: t ? 'taken' : 'free' });
+        setTimeout(function () {
+          var t = taken(e), now = Date.now();
+          if (t === was && now - said < 100) return;
+          was = t; said = now;
+          window.webkit.messageHandlers.officeScroll.postMessage({ side: t ? 'taken' : 'free' });
+        }, 0);
       }, { passive: true, capture: true });
     })();
     """
