@@ -1357,10 +1357,7 @@ final class PageView: WKWebView {
     private var back = true
     /// The page's word on whether this swipe is its own. Nil until it says.
     private var free: Bool?
-    private var asked: Date?
-    /// The page in this view has answered at least once.
-    private var heard = false
-    /// Already went somewhere, or was refused: nothing more this gesture.
+    private var asked: Date?    /// Already went somewhere, or was refused: nothing more this gesture.
     private var spent = false
     private var armedNow = false
     private var showing = false
@@ -1539,11 +1536,13 @@ final class PageView: WKWebView {
 
     /// The page has said whether the swipe would scroll something.
     func answer(free yes: Bool) {
-        heard = true
         guard axis != .down, !spent else { return }
         guard yes else {
             free = false
             spent = true
+            // Taken back a moment late, by a page's own handler: the rest of
+            // the gesture is the page's again.
+            taking = false
             settle(nil)
             return
         }
@@ -1557,11 +1556,9 @@ final class PageView: WKWebView {
     private var travel: CGFloat { max(0, back ? sideways : -sideways) }
 
     private func tell() {
-        // A page that never answers — a PDF, a page that failed to load —
-        // still has to be leavable by hand. One that has answered before is
-        // only busy, and is waited for: taking its silence for a yes is how
-        // a sideways scroll on a heavy page turned into Back (20 Oct 2026).
-        if free == nil, let asked, Date().timeIntervalSince(asked) > (heard ? 1 : 0.18) {
+        if free == nil, let asked, Date().timeIntervalSince(asked) > 0.18 {
+            // A page that never answers — a PDF, a page that failed to load —
+            // still has to be leavable by hand.
             free = true
         }
         guard free == true else { return }

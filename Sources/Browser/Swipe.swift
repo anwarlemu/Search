@@ -65,10 +65,13 @@ enum Swipe {
         if (el && el.nodeType !== 1) el = el.parentElement;
         while (el) {
           var root = el === document.documentElement || el === document.body;
-          // And one that has fenced its sideways overscroll off, anywhere
-          // under the fingers, means it to stay on the page.
-          var ob = getComputedStyle(el).overscrollBehaviorX;
-          if (ob === 'contain' || ob === 'none') return true;
+          // And a part of it that has fenced its sideways overscroll off
+          // means it to stay there. Not the page as a whole: that is most
+          // often only a page stopping its bounce.
+          if (!root) {
+            var ob = getComputedStyle(el).overscrollBehaviorX;
+            if (ob === 'contain' || ob === 'none') return true;
+          }
           var can, left, max;
           if (root) {
             can = rootCanScroll();
@@ -88,17 +91,24 @@ enum Swipe {
         return false;
       }
 
-      // Heard first, read once the page's own handlers have all had the
-      // event — whether they prevented it is only known after.
+      function say(t) {
+        var now = Date.now();
+        if (t === was && now - said < 100) return;
+        was = t; said = now;
+        window.webkit.messageHandlers.officeScroll.postMessage({ side: t ? 'taken' : 'free' });
+      }
+
+      // Answered at once, before the page's own handlers — waiting for them
+      // left the page sliding under the fingers until it spoke (21 Oct 2026).
       window.addEventListener('wheel', function (e) {
         if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
-        setTimeout(function () {
-          var t = taken(e), now = Date.now();
-          if (t === was && now - said < 100) return;
-          was = t; said = now;
-          window.webkit.messageHandlers.officeScroll.postMessage({ side: t ? 'taken' : 'free' });
-        }, 0);
+        say(taken(e));
       }, { passive: true, capture: true });
+      // And taken back after them, if one of them prevented it.
+      window.addEventListener('wheel', function (e) {
+        if (Math.abs(e.deltaX) <= Math.abs(e.deltaY) || !e.defaultPrevented) return;
+        say(true);
+      }, { passive: true });
     })();
     """
 }
