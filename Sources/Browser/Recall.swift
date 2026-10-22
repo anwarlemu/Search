@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Everywhere you have been, and everything you have kept. Two lists in the
@@ -75,7 +76,13 @@ struct HistoryPanel: View {
                                             trace: trace,
                                             go: {
                                                 browser.recalling = false
-                                                browser.active?.go(to: trace.url)
+                                                // A new tab, unless this one is
+                                                // a new tab with nothing in it yet.
+                                                if let tab = browser.active, tab.isBlank {
+                                                    tab.go(to: trace.url)
+                                                } else {
+                                                    browser.open(trace.url, foreground: true)
+                                                }
                                             },
                                             forget: { history.forget(trace.key) }
                                         )
@@ -108,8 +115,13 @@ struct HistoryPanel: View {
         }
         .animation(Motion.settle, value: clearing)
         .onAppear {
-            hunting = true
             refresh()
+            // The page had the keys, and kept them over a focus asked for
+            // while the panel was still on its way in.
+            DispatchQueue.main.async {
+                NSApp.keyWindow?.makeFirstResponder(nil)
+                hunting = true
+            }
         }
         .task(id: browser.recallHunt) {
             try? await Task.sleep(for: .milliseconds(100))
