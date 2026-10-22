@@ -105,7 +105,11 @@ final class Float {
 
         let panel = Panel(
             contentRect: corner,
-            styleMask: [.borderless, .resizable, .nonactivatingPanel],
+            // Not .resizable: with it, AppKit runs its own edge-resize in a
+            // thin border of the window, under the one drawn by Controls,
+            // and a drag that started a few pixels further in was sized by
+            // one hand and dropped by the other. Controls does all of it.
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -667,7 +671,14 @@ final class Float {
         }
 
         override func mouseUp(with event: NSEvent) {
-            settle(velocity: speed())
+            if edges.left || edges.right || edges.top || edges.bottom {
+                // Sized, it stays in the corner it was in. Judged by where it
+                // has ended up, a window grown from its far edge crossed the
+                // middle of the screen and went to the other side.
+                settle(velocity: .zero, corner: origin)
+            } else {
+                settle(velocity: speed())
+            }
             trail = []
         }
 
@@ -689,10 +700,13 @@ final class Float {
         /// Let go of, the window glides to the nearest corner, as the Mac's
         /// own picture-in-picture does. Quick and ease-out: it answers the
         /// hand at once and slows into place.
-        private func settle(velocity: CGVector) {
+        private func settle(velocity: CGVector, corner home: NSRect? = nil) {
             guard let window else { return }
             let screen = Float.screen(of: window.frame)
-            let target = Float.corner(for: window.frame, velocity: velocity, on: screen)
+            // Which corner, judged by `home` when given; the size is the window's own.
+            var judged = window.frame
+            if let home { judged.origin = NSPoint(x: home.midX - judged.width / 2, y: home.midY - judged.height / 2) }
+            let target = Float.corner(for: judged, velocity: velocity, on: screen)
             guard target != window.frame else { return }
             // Reduce Motion: straight there, no glide across the screen.
             if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
@@ -742,8 +756,13 @@ final class Float {
             var byHeight: CGFloat?
             if edges.top { byHeight = (origin.height + dy) * aspect }
             if edges.bottom { byHeight = (origin.height - dy) * aspect }
-            let asked = [byWidth, byHeight].compactMap { $0 }.max() ?? origin.width
-            let limit = (NSScreen.main?.visibleFrame.width ?? 1600) * 0.85
+            // A corner follows whichever way the hand has moved further.
+            // Taking the larger of the two meant a corner pulled straight
+            // inwards along one axis never shrank: the other axis, unmoved,
+            // still asked for the old width.
+            let asked = [byWidth, byHeight].compactMap { $0 }
+                .max { abs($0 - origin.width) < abs($1 - origin.width) } ?? origin.width
+            let limit = Float.screen(of: origin).width * 0.85
             let wide = min(max(window.minSize.width, asked), limit)
             let tall = wide / aspect
             let x = edges.left ? origin.maxX - wide : origin.minX
