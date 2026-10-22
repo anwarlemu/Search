@@ -548,7 +548,7 @@ final class Tab: ObservableObject, Identifiable {
         // Only when something they carry has changed. Taking every script
         // off and putting it back on each navigation — every reload
         // included — was work for WebKit on the way to every page.
-        let key = "\(css)|\(Notify.permission(for: site))|\(FormRelay.passkeysOffered)"
+        let key = "\(css)|\(Notify.permission(for: site))|\(FormRelay.passkeysOffered)|\(Workers.kept(from: site))"
         if armedFor === built, armed == key { return }
         armedFor = built
         armed = key
@@ -580,6 +580,11 @@ final class Tab: ObservableObject, Identifiable {
         controller.addUserScript(
             WKUserScript(source: Notify.script(permission: Notify.permission(for: site)), injectionTime: .atDocumentStart, forMainFrameOnly: false)
         )
+        if Workers.kept(from: site) {
+            controller.addUserScript(
+                WKUserScript(source: Workers.off, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+            )
+        }
         if !FormRelay.passkeysOffered {
             controller.addUserScript(
                 WKUserScript(
