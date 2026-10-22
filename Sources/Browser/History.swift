@@ -197,7 +197,11 @@ final class History: ObservableObject {
         guard !needle.isEmpty, limit > 0 else { return [] }
         let now = Date()
         var best: [(row: Suggestion, score: Double)] = []
+        // The best place, kept even when searches outrank it.
+        var placeScore = -Double.infinity
+        var places: [Suggestion] = []
         func offer(_ row: Suggestion, _ score: Double) {
+            if row.kind != .search, score > placeScore { placeScore = score; places = [row] }
             let at = best.firstIndex { other in
                 if score != other.score { return score > other.score }
                 if row.key.count != other.row.key.count { return row.key.count < other.row.key.count }
@@ -224,7 +228,9 @@ final class History: ObservableObject {
                     weight(entry.visit) + rank / 4)
                 continue
             }
-            guard let rank = rank(entry.address, against: needle) else { continue }
+            // By its address, or else by the words of its title: a page
+            // you remember by what it was, not where (22 Oct 2026).
+            guard let rank = rank(entry.address, against: needle) ?? titled(entry.trace.title, needle) else { continue }
             offer(Suggestion(key: entry.trace.label, title: entry.trace.title, url: entry.trace.url, kind: .visited),
                 weight(entry.visit) + rank / 4 + (entry.address.contains("/") ? 0 : 0.25))
         }
@@ -233,7 +239,25 @@ final class History: ObservableObject {
                   let rank = rank(known.0, against: needle) else { continue }
             offer(Suggestion(key: known.0, title: known.1, url: url, kind: .known), rank / 4)
         }
-        return best.map(\.row)
+        // Searches made before may fill all but one row: past searches
+        // with big counts used to take every row, and the pages you had
+        // been to never showed at all (22 Oct 2026).
+        var rows = best.map(\.row)
+        let searches = rows.filter { $0.kind == .search }
+        if searches.count > max(1, limit - 1), let page = places.first {
+            rows.removeAll { $0.id == searches.last?.id }
+            rows.append(page)
+        }
+        return rows
+    }
+
+    /// Every word typed starts a word of the title.
+    private func titled(_ title: String, _ needle: String) -> Double? {
+        guard needle.count >= 2, !title.isEmpty else { return nil }
+        let words = title.lowercased().split { !$0.isLetter && !$0.isNumber }
+        let typed = needle.split { !$0.isLetter && !$0.isNumber }
+        guard !typed.isEmpty, typed.allSatisfy({ t in words.contains { $0.hasPrefix(t) } }) else { return nil }
+        return 1
     }
 
     /// Complete only a spelling that round-trips to the offered destination.
