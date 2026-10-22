@@ -309,6 +309,9 @@ final class Tab: ObservableObject, Identifiable {
     /// at the head of the row and gives up its title for that letter — which
     /// is all you need for the five or six pages you keep open all day.
     @Published var pin: String?
+    /// The same pin in every window: each window holds its own tab for it,
+    /// and this is what says they are one (22 Oct 2026).
+    var pinKey: UUID?
 
     /// When you last looked at it. The summon lists pages by this, because
     /// what you were just reading is what you are most likely to want back.

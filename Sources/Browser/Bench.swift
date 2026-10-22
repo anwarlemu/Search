@@ -309,6 +309,40 @@ final class Bench {
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             browser.sleep(tab) { said in answer(["said": said, "asleep": tab.asleep]) }
 
+        case "windows":
+            // Every window but the private ones, main first: its space and
+            // its tabs, pins marked — for checking pins are shared.
+            answer(["windows": Bench.windows().map { one in
+                [
+                    "torn": one.isTorn, "space": one.profile, "spaces": one.profileNames,
+                    "tabs": one.tabs.map { tab in
+                        [tab.pin.map { "[\($0)] " } ?? "", (tab.pending ?? tab.address)?.host() ?? "blank"].joined()
+                    },
+                ] as [String: Any]
+            }])
+
+        case "pin", "unpin", "newwindow", "space":
+            // Pins and windows, on a test run only: they change the row.
+            guard Store.testing else { answer(["error": "\(verb) only works on a --test run"]); return }
+            if verb == "newwindow" {
+                browser.newWindow()
+                answer(["ok": true])
+            } else if verb == "space" {
+                let all = Bench.windows()
+                guard let at = request["window"] as? Int, all.indices.contains(at), let index = request["index"] as? Int
+                else { answer(["error": "no such window"]); return }
+                // One past the last makes a new space, the way the menu does.
+                if index == all[at].profileNames.count { all[at].addProfile(named: "Space \(index + 1)") }
+                else { all[at].switchProfile(to: index) }
+                answer(["ok": true])
+            } else {
+                guard let tab = find(request, in: browser),
+                      let owner = Browser.every.allObjects.first(where: { $0.tabs.contains { $0.id == tab.id } })
+                else { answer(missing(request)); return }
+                if verb == "pin" { owner.pin(tab) } else { owner.unpin(tab) }
+                answer(describe(tab))
+            }
+
         case "select":
             // Picking a tab takes the window over, which the bench never does
             // to someone using it: only on a BROWSER_PROBE run.
@@ -878,6 +912,10 @@ final class Bench {
         default:
             answer(["error": "unknown"])
         }
+    }
+
+    private static func windows() -> [Browser] {
+        Browser.every.allObjects.filter { !$0.isPrivate }.sorted { !$0.isTorn && $1.isTorn }
     }
 
     private func find(_ request: [String: Any], in browser: Browser) -> Tab? {

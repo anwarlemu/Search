@@ -129,6 +129,12 @@ final class Browser: NSObject, ObservableObject {
         park.tabs.append(contentsOf: going)
         if park.active == nil { park.active = going.first?.id }
         parked[index] = park
+        // A pin taken to another space leaves this one's pins in every
+        // window, and joins that one's.
+        if going.contains(where: { $0.pin != nil }) {
+            sharePins(profile)
+            sharePins(index)
+        }
         // Parked with their pages. Put to sleep on the way out, every one
         // came back stale (2 Oct 2026); left alone, the half-hour clock
         // takes them like any other tab (see Sleep.swift).
@@ -193,8 +199,11 @@ final class Browser: NSObject, ObservableObject {
             prepare(tab)
             list = [tab]
         }
-        tabs = list
-        activeID = coming.flatMap { came in list.first { $0.id == came.active }?.id } ?? list.first?.id
+        // Another window may have changed this space's pins since: a window
+        // other than the main one follows them in.
+        tabs = isTorn ? following(list, in: index) : list
+        activeID = coming.flatMap { came in tabs.first { $0.id == came.active }?.id }
+            ?? tabs.first { $0.pin == nil }?.id ?? tabs.first?.id
         if let tab = active {
             tab.touch()
             if !tab.wake() { tab.revive() }
@@ -217,20 +226,39 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// A new one, empty, at the end — and its index, for what fills it.
+    /// The spaces are every window's: one made, renamed or deleted in one
+    /// is made, renamed or deleted in all of them (22 Oct 2026).
+    private static var sharingWindows: [Browser] { every.allObjects.filter { !$0.isPrivate } }
+
     func makeProfile(named name: String) -> Int {
-        profileNames.append(name)
+        for one in Browser.sharingWindows { one.profileNames.append(name) }
         return profileNames.count - 1
     }
 
     func renameProfile(_ index: Int, to name: String) {
         guard profileNames.indices.contains(index) else { return }
-        profileNames[index] = name
+        for one in Browser.sharingWindows where one.profileNames.indices.contains(index) {
+            one.profileNames[index] = name
+        }
         writeSession()
     }
 
-    /// Its tabs close with it. Never the last one: a browser always has a
-    /// set of tabs, even an empty one.
+    /// Its tabs close with it, in every window. Never the last one: a
+    /// browser always has a set of tabs, even an empty one.
     func deleteProfile(_ index: Int) {
+        guard profileNames.count > 1, profileNames.indices.contains(index) else { return }
+        // Every window steps off it first, while the spaces still line up,
+        // and only then does each let it go.
+        Browser.sharing = true
+        for one in Browser.sharingWindows where one.profile == index {
+            one.switchProfile(to: index == 0 ? 1 : index - 1)
+        }
+        for one in Browser.sharingWindows { one.dropProfile(index) }
+        Browser.sharing = false
+        writeSession()
+    }
+
+    private func dropProfile(_ index: Int) {
         guard profileNames.count > 1, profileNames.indices.contains(index) else { return }
         if index == profile { switchProfile(to: index == 0 ? 1 : index - 1) }
         parked.removeValue(forKey: index)?.tabs.forEach { $0.close() }
@@ -786,7 +814,7 @@ final class Browser: NSObject, ObservableObject {
         // No dialog and no waiting cursor: the letter is taken from the
         // address and applied. Changing it is a separate act, for the day it
         // matters — which is why it is not folded into this one.
-        writeSession()
+        sharePins()
     }
 
     /// ⇧⌘D. The tab on screen pinned, or a pinned one let back into the row.
@@ -819,12 +847,13 @@ final class Browser: NSObject, ObservableObject {
     func endPinEdit() {
         guard editingPin != nil else { return }
         editingPin = nil
-        writeSession()
+        sharePins()
     }
 
     func unpin(_ tab: Tab) {
         if editingPin == tab.id { editingPin = nil }
         tab.pin = nil
+        tab.pinKey = nil
         // Back out of the pinned block, to the head of the loose tabs.
         if let here = tabs.firstIndex(where: { $0.id == tab.id }) {
             let home = pinnedCount
@@ -832,7 +861,7 @@ final class Browser: NSObject, ObservableObject {
                 tabs.move(fromOffsets: IndexSet(integer: here), toOffset: home > here ? home + 1 : home)
             }
         }
-        writeSession()
+        sharePins()
     }
 
     // MARK: - the address, in the tab itself
@@ -960,6 +989,10 @@ final class Browser: NSObject, ObservableObject {
         let tabs: [Tab]
         var active = 0
         let frame: NSRect
+        /// The space it opens on — the window it came from's — and, for a
+        /// window from last time, its own tabs in the other spaces.
+        var space: Int?
+        var others: [Int: [Tab]] = [:]
 
         init(tab: Tab, frame: NSRect) {
             tabs = [tab]
@@ -1056,16 +1089,29 @@ final class Browser: NSObject, ObservableObject {
         // The other windows' tabs, asleep like every restored tab, handed
         // over now and opened once this window is up to open them.
         for window in saved.windows ?? [] {
-            let restored = window.tabs.compactMap { entry -> Tab? in
-                guard let url = URL(string: entry.url) else { return nil }
-                let tab = Tab()
-                tab.restore(url: url, title: entry.title)
-                tab.pin = entry.pin
-                return tab
+            // A window's own tabs, never pins: those are the space's, and
+            // come from the main window's. A pin a window kept before pins
+            // were shared stays open there, as an ordinary tab.
+            func tabs(_ entries: [Session.Entry]) -> [Tab] {
+                entries.compactMap { entry -> Tab? in
+                    guard let url = URL(string: entry.url) else { return nil }
+                    let tab = Tab()
+                    tab.restore(url: url, title: entry.title)
+                    return tab
+                }
             }
-            guard let first = restored.first else { continue }
-            Browser.handoffs[first.id] = Handoff(tabs: restored, active: window.active, frame: NSRectFromString(window.frame))
-            Browser.reopening.append(first.id)
+            var restored = tabs(window.tabs)
+            // One that had nothing of its own in its space still comes back,
+            // with the space's pins and an empty tab.
+            if restored.isEmpty { restored = [Tab()] }
+            var handoff = Handoff(tabs: restored, active: window.active, frame: NSRectFromString(window.frame))
+            handoff.space = window.space
+            for (index, entries) in window.others ?? [:] {
+                let list = tabs(entries)
+                if !list.isEmpty { handoff.others[index] = list }
+            }
+            Browser.handoffs[restored[0].id] = handoff
+            Browser.reopening.append(restored[0].id)
         }
         let spaces = saved.profiles.isEmpty
             ? [Session.Space(name: Session.firstName, tabs: [], active: 0)]
@@ -1229,27 +1275,160 @@ final class Browser: NSObject, ObservableObject {
         watchForSleep()
     }
 
-    /// A torn window starts with the tab it was dragged out with and the
-    /// main window's profile, and with nothing else of its own: no session
-    /// read, no extensions, no bench, no updater.
+    /// A torn window starts with the tab it was dragged out with, on the
+    /// space of the window it came from, with every space there is and that
+    /// space's pins — and with nothing else of its own: no session read, no
+    /// extensions, no bench, no updater.
     private func beginTorn(_ handoff: Handoff?) {
-        profileNames = [Browser.main.map { $0.profileNames[$0.profile] } ?? Session.firstName]
+        let main = Browser.main
+        profileNames = main?.profileNames ?? [Session.firstName]
+        profile = min(max(0, handoff?.space ?? main?.profile ?? 0), profileNames.count - 1)
         welcoming = false
         bookmarks.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         prefs.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         keys.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         wireFloater()
         placing = handoff?.frame
+        for (index, list) in handoff?.others ?? [:] where profileNames.indices.contains(index) && index != profile {
+            list.forEach(prepare)
+            parked[index] = Parked(tabs: following(list, in: index), active: list.first?.id)
+        }
         if let handoff, !handoff.tabs.isEmpty {
             handoff.tabs.forEach(prepare)
-            tabs = handoff.tabs
-            let front = tabs[min(max(0, handoff.active), tabs.count - 1)]
+            tabs = following(handoff.tabs, in: profile)
+            let own = handoff.tabs[min(max(0, handoff.active), handoff.tabs.count - 1)]
+            let front = tabs.first { $0.id == own.id } ?? tabs[0]
             activeID = front.id
             DispatchQueue.main.async { _ = front.wake() }
         } else {
             adopt(freshTab())
+            tabs = following(tabs, in: profile)
         }
         watchForSleep()
+    }
+
+    // MARK: - pins, shared between windows
+
+    // A space's pins are the same in every window on it: pinned, unpinned,
+    // given another letter or put in another order in one, the others follow.
+    // Each window holds tabs of its own for them — a page can be on one
+    // window's screen at a time — tied together by `pinKey`. The main
+    // window's are the ones the session keeps (22 Oct 2026).
+
+    /// Set while one window's pins are being handed round, so the windows
+    /// taking them don't hand them on again.
+    private static var sharing = false
+
+    /// This window's tabs in a space: on screen, or parked. Nil for a space
+    /// it has never held anything in.
+    private func list(for space: Int) -> [Tab]? {
+        space == profile ? tabs : parked[space]?.tabs
+    }
+
+    /// A space's pins as the windows have them: the main window's when it
+    /// holds the space, otherwise the first other window's that does.
+    /// Nil when no other window holds the space: then there is nothing to
+    /// follow, and what this window has stands.
+    private func sharedPins(_ space: Int) -> [Tab]? {
+        let others = Browser.every.allObjects.filter { $0 !== self && !$0.isPrivate }
+        guard let source = others.first(where: { !$0.isTorn && $0.list(for: space) != nil })
+            ?? others.first(where: { $0.list(for: space) != nil }),
+              let pins = source.list(for: space)?.filter({ $0.pin != nil })
+        else { return nil }
+        for pin in pins where pin.pinKey == nil { pin.pinKey = UUID() }
+        return pins
+    }
+
+    /// `list` with the space's pins, if any other window says what they are.
+    private func following(_ list: [Tab], in space: Int) -> [Tab] {
+        sharedPins(space).map { matched(list, to: $0) } ?? list
+    }
+
+    /// `list` with its pins made `canon`'s: the ones it has kept (with
+    /// the letter brought up to date), the missing ones added asleep, the
+    /// ones gone closed — and its own tabs after them, as they were.
+    private func matched(_ list: [Tab], to canon: [Tab]) -> [Tab] {
+        var mine: [UUID: Tab] = [:]
+        var loose: [Tab] = []
+        for tab in list {
+            if tab.pin != nil, let key = tab.pinKey, mine[key] == nil {
+                mine[key] = tab
+            } else if tab.pin != nil, tab.pinKey == nil {
+                // A pin no other window knows: kept, as an ordinary tab,
+                // rather than lost.
+                tab.pin = nil
+                loose.append(tab)
+            } else if tab.pin == nil {
+                loose.append(tab)
+            } else {
+                tab.close()
+            }
+        }
+        var pins: [Tab] = []
+        for one in canon {
+            guard let key = one.pinKey else { continue }
+            if let have = mine.removeValue(forKey: key) {
+                if have.pin != one.pin { have.pin = one.pin }
+                pins.append(have)
+            } else if let url = one.pending ?? one.address {
+                let tab = Tab()
+                tab.restore(url: url, title: one.title)
+                tab.pin = one.pin
+                tab.pinKey = key
+                prepare(tab)
+                pins.append(tab)
+            }
+        }
+        for gone in mine.values {
+            if floating == gone.id { land() }
+            gone.close()
+        }
+        return pins + loose
+    }
+
+    /// This window's pins in `space`, made every window's.
+    func sharePins(_ space: Int? = nil) {
+        guard !isPrivate, !Browser.sharing else { return }
+        let space = space ?? profile
+        let canon = (list(for: space) ?? []).filter { $0.pin != nil }
+        for pin in canon where pin.pinKey == nil { pin.pinKey = UUID() }
+        Browser.sharing = true
+        defer { Browser.sharing = false }
+        for other in Browser.every.allObjects where other !== self && !other.isPrivate {
+            other.take(canon, in: space)
+        }
+        writeSession()
+    }
+
+    /// Another window's pins for `space`, taken here.
+    private func take(_ canon: [Tab], in space: Int) {
+        guard profileNames.indices.contains(space) else { return }
+        if space == profile {
+            let was = activeID
+            var list = matched(tabs, to: canon)
+            if list.isEmpty {
+                let fresh = freshTab()
+                prepare(fresh)
+                list = [fresh]
+            }
+            tabs = list
+            // The pin on screen was taken away: back to this window's own.
+            if let was, !list.contains(where: { $0.id == was }) {
+                activeID = nil
+                if let next = list.filter({ $0.pin == nil }).max(by: { $0.touched < $1.touched }) ?? list.first {
+                    select(next)
+                }
+            }
+        } else if let park = parked[space] {
+            let list = matched(park.tabs, to: canon)
+            let active = list.contains { $0.id == park.active } ? park.active : list.first?.id
+            parked[space] = list.isEmpty ? nil : Parked(tabs: list, active: active)
+        } else if !canon.isEmpty {
+            // Never held anything here: its pins wait, asleep, for the day
+            // it does — and the main window, whose session keeps them, has
+            // them now.
+            parked[space] = Parked(tabs: matched([], to: canon), active: nil)
+        }
     }
 
     /// A torn window closing takes its tabs with it, as any window's close
@@ -1268,7 +1447,8 @@ final class Browser: NSObject, ObservableObject {
     /// where it was dropped and the size of this one, with the page as it
     /// was — the same web view, not loaded again.
     func tearOff(_ tab: Tab, at point: NSPoint, frame: NSRect? = nil) {
-        guard !isPrivate, tabs.count > 1, tabs.contains(where: { $0.id == tab.id }),
+        // A pin is in every window on its space already: it doesn't leave.
+        guard !isPrivate, tab.pin == nil, tabs.count > 1, tabs.contains(where: { $0.id == tab.id }),
               let open = Browser.openTorn
         else { return }
         if floating == tab.id { land() }
@@ -1279,7 +1459,9 @@ final class Browser: NSObject, ObservableObject {
         }
         tabs.removeAll { $0.id == tab.id }
         chosen.remove(tab.id)
-        Browser.handoffs[tab.id] = Handoff(tab: tab, frame: frame ?? tornFrame(at: point))
+        var handoff = Handoff(tab: tab, frame: frame ?? tornFrame(at: point))
+        handoff.space = profile
+        Browser.handoffs[tab.id] = handoff
         open(tab.id)
         writeSession()
     }
@@ -1346,6 +1528,8 @@ final class Browser: NSObject, ObservableObject {
             }
             return true
         }
+        // A pin stays: every window on its space has it already.
+        guard tab.pin == nil else { return false }
         // The only tab in a window comes out only to go into another one.
         guard pulledOut() || (tabs.count == 1 && Browser.landing(at: at, from: self) != nil) else { return false }
         heldOut = tab.id
@@ -1400,6 +1584,7 @@ final class Browser: NSObject, ObservableObject {
     /// The tab out of this window and into `other`, where it was let go of
     /// over its row. A window left with nothing in it goes.
     func give(_ tab: Tab, to other: Browser, at point: NSPoint) {
+        guard tab.pin == nil else { return }
         if floating == tab.id { land() }
         let last = tabs.count == 1
         if !last, activeID == tab.id {
@@ -1591,10 +1776,19 @@ final class Browser: NSObject, ObservableObject {
             return Session.Space(name: profileNames[index], tabs: done.entries, active: done.active)
         }
         // Each other window as itself, where it was: it opens there again.
+        // Their own tabs only: the pins are the space's, written above.
         let windows = Browser.every.allObjects.filter(\.isTorn).compactMap { other -> Session.Window? in
-            let done = written(other.tabs, front: other.activeID)
-            guard !done.entries.isEmpty, let frame = other.window?.frame else { return nil }
-            return Session.Window(frame: NSStringFromRect(frame), tabs: done.entries, active: done.active)
+            guard let frame = other.window?.frame else { return nil }
+            let done = written(other.tabs.filter { $0.pin == nil }, front: other.activeID)
+            var others: [Int: [Session.Entry]] = [:]
+            for (index, park) in other.parked {
+                let entries = written(park.tabs.filter { $0.pin == nil }, front: nil).entries
+                if !entries.isEmpty { others[index] = entries }
+            }
+            return Session.Window(
+                frame: NSStringFromRect(frame), tabs: done.entries, active: done.active,
+                space: other.profile, others: others.isEmpty ? nil : others
+            )
         }
         Session.write(now: now, .init(profiles: spaces, current: profile, windows: windows))
     }
@@ -1845,7 +2039,7 @@ final class Browser: NSObject, ObservableObject {
         if tab.pin != nil, index >= pinned { return }
         if tab.pin == nil, index < pinned { return }
         tabs.move(fromOffsets: IndexSet(integer: here), toOffset: index > here ? index + 1 : index)
-        rememberSession()
+        if tab.pin != nil { sharePins() } else { rememberSession() }
     }
 
     func step(_ direction: Int) {

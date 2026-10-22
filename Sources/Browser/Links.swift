@@ -85,10 +85,20 @@ final class Links: NSObject, NSApplicationDelegate {
     /// rather than doing nothing, which is what a hidden-title-bar SwiftUI
     /// window does by default.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag, let window = NSApp.windows.first(where: { $0.contentView != nil }) {
-            window.makeKeyAndOrderFront(nil)
+        // A browser window, not merely the first window there is: that was
+        // often one of the app's own panels — the little video window, the
+        // tab's card, the drag's preview — fronted with nothing in it, and a
+        // click on the Dock that showed nothing at all (22 Oct 2026).
+        guard !flag else { return true }
+        let window = Links.window
+            ?? NSApp.windows.first { !($0 is NSPanel) && $0.styleMask.contains(.titled) && $0.contentView != nil }
+        guard let window else { return true }
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        MainActor.assumeIsolated {
+            Browser.every.allObjects.first { $0.window === window }?.ensureTab()
         }
-        return true
+        window.makeKeyAndOrderFront(nil)
+        return false
     }
 
     /// The browser, once it has a window. Anything that came earlier is

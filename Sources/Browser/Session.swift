@@ -28,10 +28,16 @@ enum Session {
         var windows: [Window]? = nil
     }
 
+    /// Its own tabs only: the pins are the space's, kept with the main
+    /// window's and shared with every window on that space (22 Oct 2026).
     struct Window: Codable {
         var frame: String
+        /// The space it was on, and its tabs there.
         var tabs: [Entry]
         var active: Int
+        var space: Int? = nil
+        /// Its tabs in the other spaces, by index. Missing from older files.
+        var others: [Int: [Entry]]? = nil
     }
 
     /// The file from before there were profiles: one set of tabs. Still

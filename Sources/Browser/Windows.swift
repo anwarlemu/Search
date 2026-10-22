@@ -17,7 +17,9 @@ extension Browser {
     func newWindow() {
         guard let open = Browser.openTorn else { return }
         let tab = Tab()
-        Browser.handoffs[tab.id] = Handoff(tab: tab, frame: cascade)
+        var handoff = Handoff(tab: tab, frame: cascade)
+        handoff.space = isPrivate ? nil : profile
+        Browser.handoffs[tab.id] = handoff
         open(tab.id)
     }
 
@@ -30,7 +32,9 @@ extension Browser {
         }
         let tab = Tab(configuration: Browser.extensionConfiguration(for: url))
         tab.go(to: Browser.page(url))
-        Browser.handoffs[tab.id] = Handoff(tab: tab, frame: cascade)
+        var handoff = Handoff(tab: tab, frame: cascade)
+        handoff.space = profile
+        Browser.handoffs[tab.id] = handoff
         open(tab.id)
     }
 
@@ -46,9 +50,12 @@ extension Browser {
         guard !isPrivate, let home = window else { return }
         let bottom = NSPoint(x: home.frame.minX + 60, y: home.frame.minY + 4)
         for other in Browser.every.allObjects where other !== self && other.isTorn {
-            for tab in other.tabs {
+            // Its own tabs. Its pins are this window's already, or another
+            // space's — every window has those.
+            for tab in other.tabs where tab.pin == nil {
                 other.give(tab, to: self, at: bottom)
             }
+            other.window?.close()
         }
         Browser.bringForward(home)
     }

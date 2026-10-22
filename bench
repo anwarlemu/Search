@@ -101,7 +101,7 @@ def main(argv):
         if not args: sys.exit("usage: bench wait ID [SECONDS]")
         request["id"] = args[0]
         if len(args) > 1: request["seconds"] = float(args[1])
-    elif verb in ("text", "close", "sleep", "select", "tear", "give", "card"):
+    elif verb in ("text", "close", "sleep", "select", "tear", "give", "card", "pin", "unpin"):
         if len(args) != 1: sys.exit(f"usage: bench {verb} ID")
         request["id"] = args[0]
     elif verb == "eval":
@@ -196,7 +196,10 @@ def main(argv):
         if len(args) not in (2, 3): sys.exit("usage: bench resize WIDTH HEIGHT [STEPS]")
         request["width"], request["height"] = float(args[0]), float(args[1])
         if len(args) == 3: request["steps"] = int(args[2])
-    elif verb not in ("tabs", "probe", "extensions", "newtab"):
+    elif verb == "space":
+        if len(args) != 2: sys.exit("usage: bench space WINDOW INDEX")
+        request["window"], request["index"] = int(args[0]), int(args[1])
+    elif verb not in ("tabs", "probe", "extensions", "newtab", "windows", "newwindow"):
         sys.exit(f"unknown command “{verb}” — see bench help")
 
     answer = ask(os.path.join(folder(world), "bench.sock"), request)
