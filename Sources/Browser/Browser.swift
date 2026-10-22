@@ -2063,8 +2063,8 @@ final class Browser: NSObject, ObservableObject {
         let url = Browser.page(url)
         let tab = isPrivate ? freshTab() : Tab(configuration: Browser.extensionConfiguration(for: url))
         prepare(tab)
-        let here = atEnd ? nil : tabs.firstIndex { $0.id == activeID }
-        tabs.insert(tab, at: here.map { $0 + 1 } ?? tabs.count)
+        if !atEnd { tab.opener = activeID }
+        tabs.insert(tab, at: atEnd ? tabs.count : slot(after: activeID))
         tab.go(to: url)
         if foreground {
             leaving()
@@ -2186,6 +2186,19 @@ final class Browser: NSObject, ObservableObject {
         let job = tab.web.printOperation(with: info)
         job.view?.frame = tab.web.bounds
         job.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+    }
+
+    /// Where a tab opened from another one goes: right after it — and after
+    /// anything it opened already, so three links ⌘-clicked down a page
+    /// come out in the order they were read, not reversed. The end of the
+    /// row when there is nothing to open from.
+    private func slot(after id: Tab.ID?) -> Int {
+        guard let id, var index = tabs.firstIndex(where: { $0.id == id }) else { return tabs.count }
+        // Pins keep the head of the row to themselves: a tab opened from one
+        // goes first among the loose ones.
+        if tabs[index].pin != nil { return tabs.firstIndex { $0.pin == nil } ?? tabs.count }
+        while index + 1 < tabs.count, tabs[index + 1].opener == id, tabs[index + 1].pin == nil { index += 1 }
+        return index + 1
     }
 
     private func adopt(_ tab: Tab) {
@@ -2745,8 +2758,11 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     ) -> WKWebView? {
         let from = tab(for: webView)?.id ?? activeID
         let tab = Tab(shy: tab(for: webView)?.shy ?? false, configuration: configuration)
-        adopt(tab)
+        prepare(tab)
         tab.opener = from
+        // Beside the page that opened it, like a ⌘-click — not at the end
+        // of the row, where a link you asked for ends up out of sight.
+        tabs.insert(tab, at: slot(after: from))
         activeID = tab.id
         editing = false
         // Returning the view is what makes it the target. WebKit loads the
