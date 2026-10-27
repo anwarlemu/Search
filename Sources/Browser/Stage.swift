@@ -299,8 +299,9 @@ struct WindowSetup: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { Probe(ready: ready) }
     func updateNSView(_ view: NSView, context: Context) {}
 
-    private final class Probe: NSView {
+    final class Probe: NSView {
         let ready: (NSWindow) -> Void
+        private var keyToken: NSObjectProtocol?
 
         init(ready: @escaping (NSWindow) -> Void) {
             self.ready = ready
@@ -310,12 +311,36 @@ struct WindowSetup: NSViewRepresentable {
         @available(*, unavailable)
         required init?(coder: NSCoder) { fatalError() }
 
+        deinit {
+            if let keyToken { NotificationCenter.default.removeObserver(keyToken) }
+        }
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            if let keyToken { NotificationCenter.default.removeObserver(keyToken) }
+            keyToken = nil
             guard let window else { return }
+            // SwiftUI may reuse the same window and content after closing a
+            // scene. In that case there is no new viewDidMoveToWindow; becoming
+            // key is what reconnects the browser to its reopened window.
+            keyToken = NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main
+            ) { [weak self, weak window] _ in
+                MainActor.assumeIsolated {
+                    if let window { self?.report(window) }
+                }
+            }
+            report(window)
+        }
+
+        private func report(_ window: NSWindow) {
             // The window is still being put together at this point; anything
             // set now gets overwritten a moment later.
-            DispatchQueue.main.async { self.ready(window) }
+            DispatchQueue.main.async { [weak self, weak window] in
+                guard let self, let window, self.window === window,
+                      WindowRecovery.accepts(window) else { return }
+                self.ready(window)
+            }
         }
     }
 }

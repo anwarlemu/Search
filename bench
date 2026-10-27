@@ -24,6 +24,7 @@
     ./bench shot ID [PATH] [WIDTH]     a PNG of the page → its path
     ./bench close ID | all             only tabs the bench opened
     ./bench probe                      the window's own state: panels, modal, windows
+    ./bench window-test ACTION         close/orderOut/minimize/offscreen/transparent/fullscreen/reopen — test runs only
     ./bench extensions                 installed extensions, loaded or not, with their warnings
     ./bench ext-add ID|LINK [--yes]    install from the Chrome Web Store (--yes only in a --test run)
     ./bench ext-folder PATH [--yes]    install an unpacked extension
@@ -199,6 +200,9 @@ def main(argv):
     elif verb == "space":
         if len(args) != 2: sys.exit("usage: bench space WINDOW INDEX")
         request["window"], request["index"] = int(args[0]), int(args[1])
+    elif verb == "window-test":
+        if len(args) != 1: sys.exit("usage: bench --world NAME window-test ACTION")
+        request["action"] = args[0]
     elif verb not in ("tabs", "probe", "extensions", "newtab", "windows", "newwindow"):
         sys.exit(f"unknown command “{verb}” — see bench help")
 

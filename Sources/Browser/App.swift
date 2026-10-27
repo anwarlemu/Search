@@ -612,6 +612,7 @@ struct ContentView: View {
             if !browser.isPrivate && !browser.isTorn { Links.hand(to: browser) }
             // A tab dragged out of any window opens its own through this.
             let open = openWindow
+            Links.openMain = { open(id: "browser") }
             Browser.openTorn = { id in open(id: "tab", value: id) }
             // Yesterday's other windows, now that there is a way to open them.
             if browser === Browser.main {
@@ -817,21 +818,20 @@ struct ContentView: View {
     }
 
     private func dress(_ window: NSWindow) {
+        guard WindowRecovery.accepts(window) else { return }
+        // The probe also reports a reused window becoming key. A main window
+        // whose last tab moved elsewhere needs a tab when brought back.
+        if !browser.isPrivate && !browser.isTorn { browser.ensureTab() }
+        guard browser.window !== window else { return }
         browser.window = window
+        browser.windowWatch = WindowWatch(window, browser: browser)
+        watchKeys()
         if browser.isPrivate {
             // Dark whatever the Mac is doing, so a private window is never
             // mistaken for the other kind; its pages follow.
             window.appearance = NSAppearance(named: .darkAqua)
             window.title = "Private"
-            let browser = browser
-            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
-                MainActor.assumeIsolated { browser.endPrivate() }
-            }
         } else if browser.isTorn {
-            let browser = browser
-            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
-                MainActor.assumeIsolated { browser.endTorn() }
-            }
             // Where the tab was let go of, kept on a screen.
             if let spot = browser.placing {
                 let screen = (NSScreen.screens.first { $0.frame.contains(NSPoint(x: spot.minX + 120, y: spot.maxY)) } ?? NSScreen.main)?.visibleFrame ?? spot
@@ -847,12 +847,6 @@ struct ContentView: View {
             }
         } else {
             Links.window = window
-            // Put away when its last tab went to another window: back on
-            // screen, it has a tab to show again.
-            let browser = browser
-            NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { _ in
-                MainActor.assumeIsolated { browser.ensureTab() }
-            }
         }
         // Light or dark is the app's to say (Settings › Appearance); the
         // window only has to be the ground colour that goes with it.

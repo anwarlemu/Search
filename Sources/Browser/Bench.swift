@@ -445,6 +445,27 @@ final class Bench {
             let width = request["width"] as? Double
             shoot(tab, to: URL(fileURLWithPath: path), width: width, answer)
 
+        case "window-test":
+            // Exercise a missing window without closing anyone's real pages.
+            guard Store.testing else { answer(["error": "window-test only works on a --test run"]); return }
+            let action = request["action"] as? String ?? ""
+            if action == "reopen" {
+                let handled = Links().applicationShouldHandleReopen(NSApp, hasVisibleWindows: true)
+                answer(["handled": !handled])
+                return
+            }
+            guard let window = browser.window else { answer(["error": "no browser window"]); return }
+            switch action {
+            case "close": window.performClose(nil)
+            case "orderOut": window.orderOut(nil)
+            case "minimize": window.miniaturize(nil)
+            case "offscreen": window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
+            case "transparent": window.alphaValue = 0
+            case "fullscreen": window.toggleFullScreen(nil)
+            default: answer(["error": "unknown window action"]); return
+            }
+            answer(["ok": true])
+
         case "probe":
             // The state of the window itself, for the bug that is not in a
             // page: which panels are up, whether something modal has the
@@ -473,12 +494,23 @@ final class Bench {
                 "look": browser.prefs.look.rawValue,
                 "appearance": NSApp.appearance?.name.rawValue ?? "system",
                 "key": NSApp.keyWindow.map { "\(type(of: $0)) “\($0.title)”" } ?? "",
+                "appActive": NSApp.isActive,
+                "appHidden": NSApp.isHidden,
+                "browserWindow": browser.window?.windowNumber ?? -1,
+                "linkWindow": Links.window?.windowNumber ?? -1,
             ]
             out["windows"] = NSApp.windows.map { window -> [String: Any] in
                 [
                     "kind": "\(type(of: window))",
+                    "number": window.windowNumber,
                     "title": window.title,
                     "visible": window.isVisible,
+                    "miniaturized": window.isMiniaturized,
+                    "occluded": !window.occlusionState.contains(.visible),
+                    "onActiveSpace": window.isOnActiveSpace,
+                    "alpha": window.alphaValue,
+                    "canBecomeMain": window.canBecomeMain,
+                    "content": window.contentView != nil,
                     "level": window.level.rawValue,
                     "frame": [Int(window.frame.minX), Int(window.frame.minY), Int(window.frame.width), Int(window.frame.height)],
                 ]

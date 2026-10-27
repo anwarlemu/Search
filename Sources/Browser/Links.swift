@@ -14,6 +14,9 @@ final class Links: NSObject, NSApplicationDelegate {
     private static var waiting: [URL] = []
     /// The browser's window, once there is one.
     static weak var window: NSWindow?
+    /// Re-presents the main SwiftUI scene with the same Browser and live tabs.
+    /// A closed scene cannot reliably be revived by ordering its old NSWindow.
+    static var openMain: (() -> Void)?
     /// Whether the window has been asked for on a link's behalf (summon).
     private static var summoned = false
     /// The session, written now rather than whenever its own debounce was
@@ -81,24 +84,52 @@ final class Links: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The Dock icon clicked with the window closed: bring the window back
-    /// rather than doing nothing, which is what a hidden-title-bar SwiftUI
-    /// window does by default.
+    /// A Dock click or opening the running app in Finder always targets an
+    /// owned browser window. AppKit's flag includes windows that aren't a
+    /// usable browser (and even minimized windows), so it cannot gate this.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        // A browser window, not merely the first window there is: that was
-        // often one of the app's own panels — the little video window, the
-        // tab's card, the drag's preview — fronted with nothing in it, and a
-        // click on the Dock that showed nothing at all (22 Oct 2026).
-        guard !flag else { return true }
-        let window = Links.window
-            ?? NSApp.windows.first { !($0 is NSPanel) && $0.styleMask.contains(.titled) && $0.contentView != nil }
-        guard let window else { return true }
-        if window.isMiniaturized { window.deminiaturize(nil) }
-        MainActor.assumeIsolated {
-            Browser.every.allObjects.first { $0.window === window }?.ensureTab()
+        return MainActor.assumeIsolated {
+            WindowJournal.record("reopen appKitVisible=\(flag)", window: Links.window)
+            return !Links.reopen()
         }
-        window.makeKeyAndOrderFront(nil)
-        return false
+    }
+
+    @MainActor
+    @discardableResult
+    static func reopen() -> Bool {
+        guard !Browser.quitting else { return false }
+        if let window = WindowRecovery.front {
+            Browser.every.allObjects.first { $0.window === window }?.ensureTab()
+            WindowRecovery.show(window)
+            return true
+        }
+        guard let openMain else { return false }
+        WindowJournal.record("reopen-scene")
+        openMain()
+        return true
+    }
+
+    /// An external link/notification has a particular browser as its target.
+    /// Reopening the scene keeps that Browser's existing WKWebViews alive.
+    @MainActor
+    static func show(_ browser: Browser) {
+        guard !Browser.quitting else { return }
+        if let window = browser.window, WindowRecovery.accepts(window) {
+            WindowRecovery.show(window)
+        } else if browser === Browser.main, let openMain {
+            WindowJournal.record("show-main-scene")
+            openMain()
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    func applicationDidChangeScreenParameters(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            for window in WindowRecovery.windows where !window.isMiniaturized {
+                WindowJournal.record("screens-changed", window: window)
+                WindowRecovery.keepOnScreen(window)
+            }
+        }
     }
 
     /// The browser, once it has a window. Anything that came earlier is
@@ -112,15 +143,11 @@ final class Links: NSObject, NSApplicationDelegate {
     @MainActor
     static func hand(to browser: Browser) {
         deliver = { [weak browser] url in
-            browser?.arrive(url)
+            guard let browser else { return }
+            browser.arrive(url)
             // The window closed with the app still running: the link brings
             // it back, rather than landing in a tab nobody can see.
-            if let window {
-                if !window.isVisible { window.makeKeyAndOrderFront(nil) }
-            } else {
-                _ = NSApp.delegate?.applicationOpenUntitledFile?(NSApp)
-            }
-            NSApp.activate(ignoringOtherApps: true)
+            Links.show(browser)
         }
         flush = { [weak browser] in browser?.flushSession() }
         let early = waiting

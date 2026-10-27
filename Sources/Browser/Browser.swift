@@ -969,6 +969,7 @@ final class Browser: NSObject, ObservableObject {
     private let privateStore: WKWebsiteDataStore?
     /// The window this browser draws in, once there is one.
     weak var window: NSWindow?
+    var windowWatch: WindowWatch?
 
     /// A tab for this window: an ordinary one, or one in the private store.
     func freshTab() -> Tab {
@@ -1185,10 +1186,7 @@ final class Browser: NSObject, ObservableObject {
     /// the front regardless, since macOS may hold back activating an app that
     /// isn't in front; the click that asked for it is what lets it through.
     static func bringForward(_ window: NSWindow) {
-        if window.isMiniaturized { window.deminiaturize(nil) }
-        window.orderFrontRegardless()
-        if #available(macOS 14.0, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
-        window.makeKeyAndOrderFront(nil)
+        WindowRecovery.show(window)
     }
 
     /// The little window's buttons, answered by this window's tabs.

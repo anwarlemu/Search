@@ -215,13 +215,19 @@ struct SideBar: View {
     private var pinnedTabs: [Tab] { browser.tabs.filter { $0.pin != nil } }
     private var looseTabs: [Tab] { browser.tabs.filter { $0.pin == nil } }
 
-    /// Three columns is the block's own shape — up to six pins, that's two
-    /// full rows, and one or two is just those same three places with a
-    /// couple of them empty rather than a lonely row of its own width. Only
-    /// past six does the block widen, one column at a time, to stay at two
-    /// rows for as long as that's a reasonable shape at all.
+    /// The squarest block with the fewest empty places, so every count
+    /// looks meant: one to three side by side, four as two and two, five
+    /// and six over two rows of three, nine as three threes. A tie goes to
+    /// the wider, shorter block; never more than five across (27 Oct 2026).
     private static func pinColumns(_ count: Int) -> Int {
-        max(3, (count + 1) / 2)
+        guard count > 3 else { return max(1, count) }
+        var best = (cols: 3, score: Int.max)
+        for cols in 2...5 {
+            let rows = (count + cols - 1) / cols
+            let score = 2 * (cols * rows - count) + abs(cols - rows)
+            if score <= best.score { best = (cols, score) }
+        }
+        return best.cols
     }
 
     /// Where among a column's loose rows a tab dropped this far from the top

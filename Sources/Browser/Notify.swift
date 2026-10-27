@@ -101,8 +101,7 @@ enum Notify {
                 MainActor.assumeIsolated {
                     if let id = id.flatMap(UUID.init), let browser = Clicks.shared.browser, let tab = browser.tab(id) {
                         browser.reveal(tab)
-                        NSApp.activate(ignoringOtherApps: true)
-                        Links.window?.makeKeyAndOrderFront(nil)
+                        Links.show(browser)
                         // And the page's own onclick, which is where a chat
                         // opens the thread the banner was about. The page's
                         // main frame only: one sent from inside a frame is
