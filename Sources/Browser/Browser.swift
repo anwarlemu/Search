@@ -2287,7 +2287,6 @@ final class Browser: NSObject, ObservableObject {
             announce("Hidden — ⌘Z puts it back")
         }
         tab.onPickEnd = { [weak self] _ in self?.veiling = false }
-        tab.onImageMenu = { [weak self] tab, url, link in self?.showImageMenu(for: tab, at: url, link: link) }
         tab.onNotifyAsk = { [weak self] tab, host in self?.notifyAsked(tab, host: host) }
         tab.onNotify = { [weak self] tab, host, title, body, tag in
             self?.notifyShow(tab, host: host, title: title, body: body, tag: tag)

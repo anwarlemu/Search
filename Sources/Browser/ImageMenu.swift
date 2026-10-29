@@ -13,13 +13,13 @@ import WebKit
 // picture. Neither is a bug in this app's own downloading or copying; there
 // simply isn't a public hook to fix WebKit's own menu from the outside.
 //
-// So the page's own menu is asked to step aside for exactly one element —
-// an <img>, on its own contextmenu event, nothing else touched — and this
-// app's own menu, doing the same two things a different way, stands in for
-// it. Copy Subject and Look Up are the one real loss: both are system
-// features with no public equivalent, so a picture with text or a
-// recognisable object in it won't offer to lift either, here, the way
-// Safari's own menu would.
+// So WebKit's menu still opens, at once, as it always does, and its image
+// items are swapped for this app's own as it opens (PageView.willOpenMenu),
+// which do the same things a different way. The page only says, on its way
+// to the menu, which picture the pointer was on. The menu used to be stopped
+// on the page and this one put up afterwards, when that word arrived — and
+// when it was late, or never came, a right-click did nothing at all
+// (29 Oct 2026).
 
 final class ImageRelay: NSObject, WKScriptMessageHandler {
     static let name = "officeImages"
@@ -37,23 +37,17 @@ final class ImageRelay: NSObject, WKScriptMessageHandler {
         var el = e.target;
         while (el && el.tagName !== 'IMG') el = el.parentElement;
         if (!el || !el.currentSrc || el.naturalWidth < 2) return;
-        e.preventDefault();
-        // A picture that is a link gets the link's two items as well — handed
-        // back to WebKit's menu instead, its Download Image did nothing,
-        // which on Google Images is every picture (4 Oct 2026). A blob: is
-        // the page's alone, so the page reads it out as data first.
-        var link = el.closest('a[href]');
-        var href = link ? link.href : '';
+        // A blob: is the page's alone: said as it is now, for the menu, and
+        // again as data once read, for Copy and Download.
         var src = el.currentSrc;
-        var send = function (s) { window.webkit.messageHandlers.officeImages.postMessage({ src: s, link: href }); };
+        var send = function (s) { window.webkit.messageHandlers.officeImages.postMessage({ src: s }); };
+        send(src);
         if (src.indexOf('blob:') === 0) {
           fetch(src).then(function (r) { return r.blob(); }).then(function (b) {
             var reader = new FileReader();
             reader.onload = function () { send(reader.result); };
             reader.readAsDataURL(b);
-          }).catch(function () { send(src); });
-        } else {
-          send(src);
+          }).catch(function () {});
         }
       }, true);
     })();
@@ -67,53 +61,31 @@ final class ImageRelay: NSObject, WKScriptMessageHandler {
               let src = body["src"] as? String,
               let url = URL(string: src)
         else { return }
-        let link = (body["link"] as? String).flatMap { $0.isEmpty ? nil : URL(string: $0) }
         MainActor.assumeIsolated { [weak self] in
-            guard let self, let tab else { return }
-            tab.onImageMenu?(tab, url, link)
+            self?.tab?.pointedImage = (url, Date())
         }
     }
 }
 
 extension Browser {
-    /// The menu itself, popped where the pointer already is — the click that
-    /// asked for this one happened a moment ago, in JavaScript, with no
-    /// native event left to hang an NSMenu off of.
-    func showImageMenu(for tab: Tab, at url: URL, link: URL? = nil) {
-        guard let webView = tab.built else { return }
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        if let link {
-            menu.addItem(ImageMenuItem("Open Link in New Tab") { [weak self] in
-                self?.open(link, foreground: true)
-            })
-            menu.addItem(ImageMenuItem("Copy Link Address") {
+    /// The image's own items, for WebKit's menu to carry in place of its own.
+    func imageItems(for tab: Tab, at url: URL) -> [NSMenuItem] {
+        guard let webView = tab.built else { return [] }
+        return [
+            ImageMenuItem("Open Image in New Tab") { [weak self] in
+                self?.open(url, foreground: true)
+            },
+            ImageMenuItem("Copy Image") { [weak self] in
+                self?.copyImage(at: tab.pointedImage?.url ?? url, from: tab)
+            },
+            ImageMenuItem("Download Image") { [weak self] in
+                self?.downloadImage(at: tab.pointedImage?.url ?? url, from: webView)
+            },
+            ImageMenuItem("Copy Image Address") {
                 NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(link.absoluteString, forType: .string)
-            })
-            menu.addItem(.separator())
-        }
-        menu.addItem(ImageMenuItem("Open Image in New Tab") { [weak self] in
-            self?.open(url, foreground: true)
-        })
-        menu.addItem(.separator())
-        menu.addItem(ImageMenuItem("Copy Image") { [weak self] in
-            self?.copyImage(at: url, from: tab)
-        })
-        menu.addItem(ImageMenuItem("Download Image") { [weak self] in
-            self?.downloadImage(at: url, from: webView)
-        })
-        menu.addItem(.separator())
-        menu.addItem(ImageMenuItem("Copy Image Address") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(url.absoluteString, forType: .string)
-        })
-
-        let screen = NSEvent.mouseLocation
-        guard let window = webView.window else { return }
-        let atWindow = window.convertPoint(fromScreen: screen)
-        let atView = webView.convert(atWindow, from: nil)
-        menu.popUp(positioning: nil, at: atView, in: webView)
+                NSPasteboard.general.setString(url.absoluteString, forType: .string)
+            },
+        ]
     }
 
     /// Fetched once, written as an actual image rather than a reference to

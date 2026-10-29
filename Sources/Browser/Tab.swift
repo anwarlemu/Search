@@ -268,10 +268,9 @@ final class Tab: ObservableObject, Identifiable {
     var onCredentials: ((Tab, String, String, String) -> Void)?
     var onPickEnd: ((Tab) -> Void)?
     var onPickTrouble: ((Tab, String) -> Void)?
-    /// Right-click landed on an image. WebKit's own menu offers to copy or
-    /// download it and then, on at least some sites, does neither — see
-    /// ImageMenu.swift for why this is built rather than patched.
-    var onImageMenu: ((Tab, URL, URL?) -> Void)?
+    /// The picture last right-clicked, as the page said on the way to the
+    /// menu; ImageMenu.swift for why.
+    var pointedImage: (url: URL, at: Date)?
     /// "Add to Search" was pressed on the Chrome Web Store page this tab shows.
     var onStoreAdd: ((Tab) -> Void)?
     /// A page asking to send notifications; a page sending one — the site,
@@ -1230,6 +1229,7 @@ final class PageView: WKWebView {
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         super.willOpenMenu(menu, with: event)
         offerWindow(in: menu)
+        offerImage(in: menu)
         guard #available(macOS 15.4, *),
               let tab = Extensions.shared.browser?.tabs.first(where: { $0.built === self })
         else { return }
@@ -1237,6 +1237,26 @@ final class PageView: WKWebView {
         guard !items.isEmpty else { return }
         menu.addItem(.separator())
         items.forEach { menu.addItem($0) }
+    }
+
+    /// WebKit's image items, where it put them, swapped for this app's own;
+    /// the rest of its menu — the link's items, Copy Subject, Look Up —
+    /// stays as it is.
+    private func offerImage(in menu: NSMenu) {
+        guard let owner = Browser.every.allObjects.first(where: { $0.tabs.contains { $0.built === self } }),
+              let tab = owner.tabs.first(where: { $0.built === self }),
+              let pointed = tab.pointedImage, Date().timeIntervalSince(pointed.at) < 2
+        else { return }
+        tab.pointedImage = nil
+        let theirs = menu.items.indices.filter {
+            let id = menu.items[$0].identifier?.rawValue ?? ""
+            return id.contains("Image") && !id.contains("LookUp") && !id.contains("Subject")
+        }
+        let at = theirs.first ?? 0
+        for index in theirs.reversed() { menu.removeItem(at: index) }
+        let mine = owner.imageItems(for: tab, at: pointed.url)
+        if theirs.isEmpty, !menu.items.isEmpty { menu.insertItem(.separator(), at: 0) }
+        for (n, item) in mine.enumerated() { menu.insertItem(item, at: at + n) }
     }
 
     /// WebKit's "Open Link in New Window" opens a tab here, so it is called
