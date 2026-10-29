@@ -55,9 +55,15 @@ enum WindowRecovery {
         if window.isMiniaturized { window.deminiaturize(nil) }
         keepOnScreen(window)
         window.alphaValue = 1
+        // On another desktop it was "visible", and fronted there, where
+        // nobody was looking; the Dock did nothing while the little video
+        // window played on (29 Oct 2026). It comes to this desktop instead.
+        let behaviour = window.collectionBehavior
+        if !window.isOnActiveSpace { window.collectionBehavior.insert(.moveToActiveSpace) }
         window.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.async { window.collectionBehavior = behaviour }
         WindowJournal.record("recover-after", window: window)
     }
 }
