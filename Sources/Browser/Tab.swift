@@ -1229,6 +1229,7 @@ extension WKWebView {
 final class PageView: WKWebView {
     /// What extensions added to the right-click menu, at the end of it.
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        menuOpened = Date()
         super.willOpenMenu(menu, with: event)
         offerWindow(in: menu)
         offerImage(in: menu)
@@ -1239,6 +1240,27 @@ final class PageView: WKWebView {
         guard !items.isEmpty else { return }
         menu.addItem(.separator())
         items.forEach { menu.addItem($0) }
+    }
+
+    private var menuOpened = Date.distantPast
+
+    /// The page stopped the right-click's menu, over a picture. Unless
+    /// WebKit put one up after all, the picture's own items come up where
+    /// the pointer is.
+    func menuRefused(_ url: URL) {
+        let asked = Date()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, let window, menuOpened < asked.addingTimeInterval(-1),
+                  let owner = Browser.every.allObjects.first(where: { $0.tabs.contains { $0.built === self } }),
+                  let tab = owner.tabs.first(where: { $0.built === self })
+            else { return }
+            let items = owner.imageItems(for: tab, at: tab.pointedImage?.url ?? url)
+            guard !items.isEmpty else { return }
+            let menu = NSMenu()
+            items.forEach { menu.addItem($0) }
+            let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            menu.popUp(positioning: nil, at: point, in: self)
+        }
     }
 
     /// WebKit's image items, where it put them, swapped for this app's own;

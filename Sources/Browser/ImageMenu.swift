@@ -20,6 +20,11 @@ import WebKit
 // on the page and this one put up afterwards, when that word arrived — and
 // when it was late, or never came, a right-click did nothing at all
 // (29 Oct 2026).
+//
+// Two ways a right-click on a picture still offered nothing to save: a clear
+// layer over it, which WebKit's menu took for the thing clicked, and a page
+// that stops the menu altogether. The picture is found under the layer, and
+// a stopped menu is replaced with this app's, for pictures only (31 Oct 2026).
 
 final class ImageRelay: NSObject, WKScriptMessageHandler {
     static let name = "officeImages"
@@ -33,15 +38,30 @@ final class ImageRelay: NSObject, WKScriptMessageHandler {
     (function () {
       if (window.__officeImages) return;
       window.__officeImages = true;
-      document.addEventListener('contextmenu', function (e) {
-        var el = e.target;
+      function picture(el) {
         while (el && el.tagName !== 'IMG') el = el.parentElement;
-        if (!el || !el.currentSrc || el.naturalWidth < 2) return;
+        return el && el.currentSrc && el.naturalWidth >= 2 ? el : null;
+      }
+      document.addEventListener('contextmenu', function (e) {
+        var el = picture(e.target);
+        // A clear layer laid over the picture — Google Images' panel has
+        // one — is what the click lands on: the picture is looked for
+        // underneath it, as far down as the point goes.
+        if (!el && document.elementsFromPoint) {
+          var under = document.elementsFromPoint(e.clientX, e.clientY);
+          for (var i = 0; i < under.length && !el; i++) el = picture(under[i]);
+        }
+        if (!el) return;
         // A blob: is the page's alone: said as it is now, for the menu, and
         // again as data once read, for Copy and Download.
         var src = el.currentSrc;
         var send = function (s) { window.webkit.messageHandlers.officeImages.postMessage({ src: s }); };
         send(src);
+        // Once every handler has had the event: a page that stopped the
+        // menu still gets this one, for the picture.
+        setTimeout(function () {
+          if (e.defaultPrevented) window.webkit.messageHandlers.officeImages.postMessage({ src: src, blocked: true });
+        }, 0);
         if (src.indexOf('blob:') === 0) {
           fetch(src).then(function (r) { return r.blob(); }).then(function (b) {
             var reader = new FileReader();
@@ -61,8 +81,14 @@ final class ImageRelay: NSObject, WKScriptMessageHandler {
               let src = body["src"] as? String,
               let url = URL(string: src)
         else { return }
+        let blocked = body["blocked"] as? Bool ?? false
         MainActor.assumeIsolated { [weak self] in
-            self?.tab?.pointedImage = (url, Date())
+            guard let tab = self?.tab else { return }
+            if blocked {
+                (tab.built as? PageView)?.menuRefused(url)
+            } else {
+                tab.pointedImage = (url, Date())
+            }
         }
     }
 }
