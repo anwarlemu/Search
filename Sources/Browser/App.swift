@@ -409,7 +409,8 @@ struct ContentView: View {
 
                     // One stage, always.
                     if let tab = browser.active {
-                        Page(tab: tab, retry: { browser.retrySlowPage(tab, resetWorker: $0) })
+                        Page(tab: tab, pins: browser.tabs.filter { $0.pin != nil },
+                             retry: { browser.retrySlowPage(tab, resetWorker: $0) })
                             .overlay(alignment: .topTrailing) {
                                 if browser.finding {
                                     FindBar(browser: browser)

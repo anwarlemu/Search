@@ -151,6 +151,7 @@ final class Float {
         // AppKit, and the crash of 23 Sep 2026.
         panel.contentView = ground
         page.removeFromSuperview()
+        page.isHidden = false
         page.frame = ground.bounds
         page.autoresizingMask = [.width, .height]
         ground.addSubview(page)

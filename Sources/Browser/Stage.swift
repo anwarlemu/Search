@@ -16,13 +16,14 @@ import WebKit
 /// re-ran the stage for every tick of progress and every scroll (2 Oct 2026).
 struct Page: View {
     let tab: Tab
+    var pins: [Tab] = []
     /// For the slow-page card: try the page again, with the site's worker
     /// reset first when asked.
     var retry: (Bool) -> Void = { _ in }
 
     var body: some View {
         ZStack {
-            Stage(tab: tab, stage: tab.stage)
+            Stage(tab: tab, pins: pins, stage: tab.stage)
             Overlays(tab: tab, retry: retry)
         }
     }
@@ -36,10 +37,12 @@ struct Page: View {
 /// little window, finding its page gone, closed itself (2 Oct 2026).
 private struct Stage: View {
     let tab: Tab
+    let pins: [Tab]
     @ObservedObject var stage: Tab.Staging
 
     var body: some View {
-        WebStage(page: stage.wanted ? tab.web : nil)
+        WebStage(page: stage.wanted ? tab.web : nil,
+                 keeping: pins.filter { $0.stage.wanted }.compactMap { $0.built })
     }
 }
 
@@ -213,11 +216,12 @@ private struct Disc: View {
 /// reload, no lost scroll position, no forgotten form.
 struct WebStage: NSViewRepresentable {
     let page: NSView?
+    var keeping: [NSView] = []
 
     func makeNSView(context: Context) -> StageView { StageView() }
 
     func updateNSView(_ view: StageView, context: Context) {
-        view.show(page)
+        view.show(page, keeping: keeping)
     }
 }
 
@@ -234,25 +238,42 @@ final class StageView: NSView {
     /// Now there is one fact and one rule: show `wanted`, and put that right on
     /// every layout. Nothing to fall out of step with.
     private weak var wanted: NSView?
+    private let kept = NSHashTable<NSView>.weakObjects()
 
     override func layout() {
         super.layout()
         settle()
     }
 
-    func show(_ page: NSView?) {
+    func show(_ page: NSView?, keeping: [NSView] = []) {
         wanted = page
+        kept.removeAllObjects()
+        keeping.forEach { kept.add($0) }
         settle()
     }
 
     private func settle() {
-        // Anything here that isn't wanted, out. Only ever what is actually
-        // ours: a page may be somewhere else on purpose.
+        // Open pins stay in this window, hidden. Detaching them on every
+        // switch makes WebKit tear down their visible state and rebuild it
+        // on return, even though their document is still alive. Only keep
+        // pages already here: a floating page belongs to its other window,
+        // and a restored pin must not build a view until it is opened.
         for view in subviews where view !== wanted {
-            view.removeFromSuperview()
+            if kept.contains(view) {
+                if let responder = window?.firstResponder as? NSView,
+                   responder.isDescendant(of: view) {
+                    window?.makeFirstResponder(nil)
+                }
+                view.isHidden = true
+            } else {
+                view.isHidden = false
+                view.removeFromSuperview()
+            }
         }
 
         guard let wanted, window != nil else { return }
+        wanted.frame = bounds
+        wanted.isHidden = false
         if wanted.superview !== self {
             // A web view can have only one superview, so taking it back is how
             // it is taken back.
@@ -266,7 +287,6 @@ final class StageView: NSView {
             wanted.needsDisplay = true
             wanted.layer?.setNeedsDisplay()
         }
-        wanted.frame = bounds
     }
 }
 
