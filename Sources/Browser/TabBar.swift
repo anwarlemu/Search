@@ -127,6 +127,7 @@ struct TabBar: View {
         // and the tabs appeared to jump aside.
         .animation(Motion.glide, value: browser.editingTab)
         .animation(Motion.settle, value: browser.tabs.map(\.id))
+        .animation(Motion.settle, value: browser.groups)
     }
 
     /// How wide the run of tabs is: as wide as the tabs while they fit, as
@@ -144,9 +145,11 @@ struct TabBar: View {
     private func content(in strip: CGFloat) -> CGFloat {
         let each = width(in: strip)
         let pinned = CGFloat(browser.pinnedCount)
-        let loose = CGFloat(browser.tabs.count) - pinned
+        // Each group's head is as wide as a tab; a folded group's tabs
+        // take no room at all.
+        let loose = CGFloat(browser.slots.count)
         var total = pinned * Metrics.pinWidth + loose * each
-            + CGFloat(max(0, browser.tabs.count - 1)) * Metrics.tabGap
+            + CGFloat(max(0, Int(pinned + loose) - 1)) * Metrics.tabGap
         if let id = browser.editingTab, let tab = browser.tabs.first(where: { $0.id == id }) {
             total += min(340, strip - Metrics.lights - 12) - (tab.pin != nil ? Metrics.pinWidth : each)
         }
@@ -168,10 +171,10 @@ struct TabBar: View {
     /// their room off the top.
     private func width(in strip: CGFloat) -> CGFloat {
         let pinned = CGFloat(browser.pinnedCount)
-        let loose = CGFloat(browser.tabs.count) - pinned
+        let loose = CGFloat(browser.slots.count)
         guard loose > 0 else { return Metrics.tabWidth }
         let spent = pinned * Metrics.pinWidth
-            + CGFloat(max(0, browser.tabs.count - 1)) * Metrics.tabGap
+            + CGFloat(max(0, Int(pinned + loose) - 1)) * Metrics.tabGap
         return max(Metrics.tabMinWidth, min(Metrics.tabWidth, (room(in: strip) - spent) / loose))
     }
 }
@@ -204,6 +207,10 @@ private struct TabRun: View {
     @State private var target = 0
     @State private var travel: CGFloat = 0
     @State private var stride: CGFloat = 0
+    /// A group's head under the hand instead, and how many places it
+    /// carries: itself and its tabs.
+    @State private var draggingGroup: UUID?
+    @State private var carried = 1
     /// How far the run has scrolled, and how wide its content is, for the
     /// fade at an edge with tabs beyond it.
     @State private var scrolled: CGFloat = 0
@@ -213,37 +220,68 @@ private struct TabRun: View {
         ScrollViewReader { reader in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Metrics.tabGap) {
-                    ForEach(Array(browser.tabs.enumerated()), id: \.element.id) { index, tab in
-                        // A pinned square moves among pinned squares, a title
-                        // among titles: each has its own stride.
-                        let step = (tab.pin != nil ? Metrics.pinWidth : width) + Metrics.tabGap
-                        let held = dragging == tab.id
-                        let editing = browser.editingTab == tab.id
-                        TabPill(
-                            browser: browser,
-                            tab: tab,
-                            live: tab.id == browser.activeID,
-                            editing: editing,
-                            lettering: browser.editingPin == tab.id,
-                            chosen: browser.chosen.contains(tab.id),
-                            icons: browser.prefs.glyph == .icons,
-                            refusals: browser.refusals,
-                            width: width,
-                            room: room,
-                            pill: pill
-                        )
-                        .equatable()
+                    let pins = browser.tabs.filter { $0.pin != nil }
+                    let cells: [Slot] = pins.map { .tab($0) } + browser.slots
+                    ForEach(Array(cells.enumerated()), id: \.element.id) { index, cell in
+                        let held = dragging != nil && dragging == cell.tab?.id
+                            || draggingGroup != nil && index >= from && index < from + carried
+                        Group {
+                            switch cell {
+                            case .head(let group):
+                                GroupHead(
+                                    browser: browser,
+                                    group: group,
+                                    count: browser.members(of: group).count,
+                                    naming: browser.editingGroup == group.id,
+                                    width: browser.editingGroup == group.id ? max(width, 140) : width
+                                )
+                                .equatable()
+                                .highPriorityGesture(reorder(group: group, index: index, step: width + Metrics.tabGap,
+                                                             cells: cells, pinned: pins.count))
+                            case .tab(let tab):
+                                // A pinned square moves among pinned squares, a title
+                                // among titles: each has its own stride.
+                                let step = (tab.pin != nil ? Metrics.pinWidth : width) + Metrics.tabGap
+                                let editing = browser.editingTab == tab.id
+                                TabPill(
+                                    browser: browser,
+                                    tab: tab,
+                                    live: tab.id == browser.activeID,
+                                    editing: editing,
+                                    lettering: browser.editingPin == tab.id,
+                                    chosen: browser.chosen.contains(tab.id),
+                                    icons: browser.prefs.glyph == .icons,
+                                    refusals: browser.refusals,
+                                    width: width,
+                                    room: room,
+                                    pill: pill
+                                )
+                                .equatable()
+                                // A group's tabs carry a faint line along their foot,
+                                // so where the group ends can be seen.
+                                .overlay(alignment: .bottom) {
+                                    if browser.group(of: tab) != nil {
+                                        Capsule()
+                                            .fill(Palette.ink.opacity(0.14))
+                                            .frame(height: 2)
+                                            .padding(.horizontal, 6)
+                                            .offset(y: 4)
+                                    }
+                                }
+                                .opacity(browser.heldOut == tab.id ? 0 : 1)
+                                // Ahead of the run's own scrolling. A click without
+                                // movement still isn't a drag, so the tap goes on
+                                // answering at once.
+                                .highPriorityGesture(reorder(tab: tab, index: index, step: step,
+                                                             count: cells.count, pinned: pins.count))
+                                .id(tab.id)
+                            }
+                        }
                         // The held pill keeps up with the hand; the others make
                         // way for it.
                         .offset(x: held ? travel : aside(index))
-                        .opacity(browser.heldOut == tab.id ? 0 : 1)
                         .zIndex(held ? 1 : 0)
-                        .shadow(color: .black.opacity(held ? 0.14 : 0), radius: 12, y: 4)
-                        // Ahead of the run's own scrolling. A click without
-                        // movement still isn't a drag, so the tap goes on
-                        // answering at once.
-                        .highPriorityGesture(reorder(tab: tab, index: index, step: step))
-                        .id(tab.id)
+                        .shadow(color: .black.opacity(held && draggingGroup == nil ? 0.14 : 0), radius: 12, y: 4)
                     }
                 }
                 .frame(height: Metrics.strip)
@@ -283,6 +321,7 @@ private struct TabRun: View {
         .animation(Motion.glide, value: browser.activeID)
         .animation(Motion.glide, value: browser.editingTab)
         .animation(Motion.settle, value: browser.tabs.map(\.id))
+        .animation(Motion.settle, value: browser.groups)
     }
 
     /// The strip's own ground, thinning to nothing over the first tab or so.
@@ -297,16 +336,16 @@ private struct TabRun: View {
     }
 
     /// How far a tab that isn't held has stepped aside: the held tab's own
-    /// stride, in the direction that makes room for it.
+    /// stride — or a whole group's — in the direction that makes room for it.
     private func aside(_ index: Int) -> CGFloat {
-        guard dragging != nil else { return 0 }
-        if from < index, index <= target { return -stride }
-        if target <= index, index < from { return stride }
+        guard dragging != nil || draggingGroup != nil else { return 0 }
+        if index < from, index >= target { return CGFloat(carried) * stride }
+        if index >= from + carried, index - carried < target { return -CGFloat(carried) * stride }
         return 0
     }
 
     /// Pick a tab up and the others get out of its way as it passes them.
-    private func reorder(tab: Tab, index: Int, step: CGFloat) -> some Gesture {
+    private func reorder(tab: Tab, index: Int, step: CGFloat, count: Int, pinned: Int) -> some Gesture {
         // In the row's space, not the pill's — see the sidebar's grid for why.
         DragGesture(minimumDistance: 5, coordinateSpace: .named("strip"))
             .onChanged { value in
@@ -315,12 +354,12 @@ private struct TabRun: View {
                     from = index
                     target = index
                     stride = step
+                    carried = 1
                 }
                 // Pins move among pins, titles among titles — and the held
                 // pill no further than the first or last place it could take.
-                let pinned = browser.pinnedCount
                 let low = tab.pin != nil ? 0 : pinned
-                let high = tab.pin != nil ? max(0, pinned - 1) : browser.tabs.count - 1
+                let high = tab.pin != nil ? max(0, pinned - 1) : count - 1
                 // Held out below the strip: its preview follows the pointer and
                 // the pills close up behind it. Back on the strip, it is a pill
                 // under the hand again and this goes on placing it.
@@ -344,10 +383,45 @@ private struct TabRun: View {
                 // One move and the return of every offset in the same breath:
                 // each tab's place changes by exactly what its offset gives
                 // back, so only the held tab is seen to move — into its slot.
+                // Where a loose one lands says which group it is in.
                 withAnimation(Motion.settle) {
-                    browser.move(tab, to: target)
+                    if tab.pin != nil {
+                        browser.move(tab, to: target)
+                    } else {
+                        browser.place(tab, at: target - pinned)
+                    }
                     dragging = nil
                     travel = 0
+                }
+            }
+    }
+
+    /// A head picked up takes its tabs along, and comes down only between
+    /// groups and loose tabs.
+    private func reorder(group: TabGroup, index: Int, step: CGFloat, cells: [Slot], pinned: Int) -> some Gesture {
+        DragGesture(minimumDistance: 5, coordinateSpace: .named("strip"))
+            .onChanged { value in
+                if draggingGroup != group.id {
+                    draggingGroup = group.id
+                    from = index
+                    target = index
+                    stride = step
+                    carried = Browser.span(of: group, at: index, in: cells)
+                }
+                let low = CGFloat(pinned - from) * step
+                let high = CGFloat(cells.count - carried - from) * step
+                travel = min(max(low, value.translation.width), high)
+                let wanted = pinned + browser.landing(of: group, near: from - pinned + Int((travel / step).rounded()))
+                if wanted != target {
+                    withAnimation(Motion.settle) { target = wanted }
+                }
+            }
+            .onEnded { _ in
+                withAnimation(Motion.settle) {
+                    browser.place(group, at: target - pinned)
+                    draggingGroup = nil
+                    travel = 0
+                    carried = 1
                 }
             }
     }
@@ -799,7 +873,34 @@ struct TabMenu: View {
                 if browser.profileNames.count > 1 { Divider() }
                 Button("New Profile…") { browser.moveChosenToNewProfile() }
             }
+            Button("Group \(count) Tabs") { browser.groupChosen() }
+                .disabled(browser.chosenTabs.allSatisfy { $0.pin != nil })
+            if !browser.groupsShown.isEmpty {
+                Menu("Add \(count) Tabs to Group") {
+                    ForEach(browser.groupsShown) { group in
+                        Button(group.name.isEmpty ? "Untitled" : group.name) { browser.addChosen(to: group) }
+                    }
+                }
+            }
             Button("Close \(count) Tabs") { browser.closeChosen() }
+            Divider()
+        }
+        if tab.pin == nil, !(browser.chosen.count > 1 && browser.chosen.contains(tab.id)) {
+            let others = browser.groupsShown.filter { $0.id != browser.group(of: tab)?.id }
+            if others.isEmpty {
+                Button("Add to New Group") { browser.makeGroup(of: [tab]) }
+            } else {
+                Menu("Add to Group") {
+                    Button("New Group") { browser.makeGroup(of: [tab]) }
+                    Divider()
+                    ForEach(others) { group in
+                        Button(group.name.isEmpty ? "Untitled" : group.name) { browser.add([tab], to: group) }
+                    }
+                }
+            }
+            if browser.group(of: tab) != nil {
+                Button("Remove from Group") { browser.removeFromGroup(tab) }
+            }
             Divider()
         }
         if !browser.isPrivate, !(browser.chosen.count > 1 && browser.chosen.contains(tab.id)) {

@@ -20,6 +20,10 @@ struct SideBar: View {
     @State private var target = 0
     @State private var travel: CGFloat = 0
     @State private var landing = false
+    /// A group's head under the hand instead, and how many rows it carries:
+    /// itself and its tabs, picked up and put down together.
+    @State private var draggingGroup: UUID?
+    @State private var span = 1
     /// The width the column had when the edge was picked up.
     @State private var grabbed: CGFloat?
     @State private var onEdge = false
@@ -115,6 +119,7 @@ struct SideBar: View {
         .animation(Motion.glide, value: browser.editingTab)
         .animation(Motion.settle, value: browser.tabs.map(\.id))
         .animation(Motion.settle, value: browser.pinnedCount)
+        .animation(Motion.settle, value: browser.groups)
     }
 
     /// The column's edge: pull it to make the column wider or narrower,
@@ -178,9 +183,9 @@ struct SideBar: View {
             : CGFloat(pinRows) * pinHeight + CGFloat(pinRows - 1) * SideBar.pinGap + 10
     }
 
-    /// The loose rows and the new-tab row, as drawn.
+    /// The loose rows, the groups' heads and the new-tab row, as drawn.
     private var looseHeight: CGFloat {
-        CGFloat(browser.tabs.count - browser.pinnedCount) * (SideBar.row + SideBar.gap) + SideBar.row
+        CGFloat(browser.slots.count) * (SideBar.row + SideBar.gap) + SideBar.row
     }
 
     /// The foot's doors and the air around them, which the rows stop short of.
@@ -213,7 +218,6 @@ struct SideBar: View {
     // MARK: - the pinned squares
 
     private var pinnedTabs: [Tab] { browser.tabs.filter { $0.pin != nil } }
-    private var looseTabs: [Tab] { browser.tabs.filter { $0.pin == nil } }
 
     /// The squarest block with the fewest empty places, so every count
     /// looks meant: one to three side by side, four as two and two, five
@@ -368,57 +372,78 @@ struct SideBar: View {
     // MARK: - the rows
 
     private var loose: some View {
-        VStack(spacing: SideBar.gap) {
+        let slots = browser.slots
+        let step = SideBar.row + SideBar.gap
+        return VStack(spacing: SideBar.gap) {
             // See the grid: the drag is measured in the column's space, not
             // the row's, so a row that has just moved keeps its bearings.
-            ForEach(Array(looseTabs.enumerated()), id: \.element.id) { index, tab in
-                let step = SideBar.row + SideBar.gap
-                let held = dragging == tab.id
-                SideRow(
-                    browser: browser,
-                    tab: tab,
-                    live: tab.id == browser.activeID,
-                    editing: browser.editingTab == tab.id,
-                    chosen: browser.chosen.contains(tab.id),
-                    icons: prefs.glyph == .icons,
-                    refusals: browser.refusals,
-                    pill: pill
-                )
-                .equatable()
+            ForEach(Array(slots.enumerated()), id: \.element.id) { index, slot in
+                let held = dragging == slot.tab?.id && dragging != nil
+                    || draggingGroup != nil && index >= from && index < from + span
+                Group {
+                    switch slot {
+                    case .head(let group):
+                        GroupHead(
+                            browser: browser,
+                            group: group,
+                            count: browser.members(of: group).count,
+                            naming: browser.editingGroup == group.id,
+                            height: SideBar.row
+                        )
+                        .equatable()
+                        .highPriorityGesture(reorder(group: group, index: index, step: step, slots: slots))
+                    case .tab(let tab):
+                        SideRow(
+                            browser: browser,
+                            tab: tab,
+                            live: tab.id == browser.activeID,
+                            editing: browser.editingTab == tab.id,
+                            chosen: browser.chosen.contains(tab.id),
+                            icons: prefs.glyph == .icons,
+                            refusals: browser.refusals,
+                            pill: pill
+                        )
+                        .equatable()
+                        // A group's tabs sit in from its head.
+                        .padding(.leading, browser.group(of: tab) == nil ? 0 : 12)
+                        .opacity(browser.heldOut == tab.id ? 0 : 1)
+                        // Ahead of the column's own scrolling, as in the strip.
+                        .highPriorityGesture(reorder(tab: tab, index: index, step: step, count: slots.count))
+                        .id(tab.id)
+                    }
+                }
                 .offset(y: held ? travel : aside(index, step: step))
-                .opacity(browser.heldOut == tab.id ? 0 : 1)
                 .zIndex(held ? 1 : 0)
-                .shadow(color: .black.opacity(held ? 0.14 : 0), radius: 12, y: 4)
-                // Ahead of the column's own scrolling, as in the strip.
-                .highPriorityGesture(reorder(tab: tab, index: index, step: step))
-                .id(tab.id)
+                .shadow(color: .black.opacity(held && draggingGroup == nil ? 0.14 : 0), radius: 12, y: 4)
             }
         }
         .coordinateSpace(name: "rows")
     }
 
-    /// How far a row that isn't held has stepped aside for the one that is.
+    /// How far a row that isn't held has stepped aside for the one that is —
+    /// or for a group's head and its tabs, all of them at once.
     private func aside(_ index: Int, step: CGFloat) -> CGFloat {
-        guard dragging != nil else { return 0 }
-        if from < index, index <= target { return -step }
-        if target <= index, index < from { return step }
+        guard dragging != nil || draggingGroup != nil else { return 0 }
+        if index < from, index >= target { return CGFloat(span) * step }
+        if index >= from + span, index - span < target { return -CGFloat(span) * step }
         return 0
     }
 
     /// Pick a row up and the others make way as it passes them.
-    private func reorder(tab: Tab, index: Int, step: CGFloat) -> some Gesture {
+    private func reorder(tab: Tab, index: Int, step: CGFloat, count: Int) -> some Gesture {
         DragGesture(minimumDistance: 5, coordinateSpace: .named("rows"))
             .onChanged { value in
                 if dragging != tab.id {
                     dragging = tab.id
                     from = index
                     target = index
+                    span = 1
                 }
                 // Held out past the column: its preview follows the pointer,
                 // and the rows close up behind it. Back over the column, it is
                 // a row under the hand again and this goes on placing it.
                 if browser.dragging(tab) {
-                    let last = looseTabs.count - 1
+                    let last = count - 1
                     if target != last { withAnimation(Motion.settle) { target = last } }
                     return
                 }
@@ -426,9 +451,9 @@ struct SideBar: View {
                 // row slid out from under the column and out of sight
                 // (15 Oct 2026).
                 let up = -CGFloat(from) * step
-                let down = CGFloat(looseTabs.count - 1 - from) * step
+                let down = CGFloat(count - 1 - from) * step
                 travel = min(max(up, value.translation.height), down)
-                let wanted = min(max(0, from + Int((travel / step).rounded())), looseTabs.count - 1)
+                let wanted = min(max(0, from + Int((travel / step).rounded())), count - 1)
                 if wanted != target {
                     withAnimation(Motion.settle) { target = wanted }
                 }
@@ -440,12 +465,41 @@ struct SideBar: View {
                     travel = 0
                     return
                 }
-                // Positions here are among the loose rows; the pinned block
-                // sits in front of them in the real list.
+                // Where it lands among the rows says which group, if any,
+                // it is in; see Groups.swift.
                 withAnimation(Motion.settle) {
-                    browser.move(tab, to: target + browser.pinnedCount)
+                    browser.place(tab, at: target)
                     dragging = nil
                     travel = 0
+                }
+            }
+    }
+
+    /// A head picked up takes its tabs with it, and comes down only between
+    /// groups and loose tabs, never inside another group.
+    private func reorder(group: TabGroup, index: Int, step: CGFloat, slots: [Slot]) -> some Gesture {
+        DragGesture(minimumDistance: 5, coordinateSpace: .named("rows"))
+            .onChanged { value in
+                if draggingGroup != group.id {
+                    draggingGroup = group.id
+                    from = index
+                    target = index
+                    span = Browser.span(of: group, at: index, in: slots)
+                }
+                let up = -CGFloat(from) * step
+                let down = CGFloat(slots.count - span - from) * step
+                travel = min(max(up, value.translation.height), down)
+                let wanted = browser.landing(of: group, near: from + Int((travel / step).rounded()))
+                if wanted != target {
+                    withAnimation(Motion.settle) { target = wanted }
+                }
+            }
+            .onEnded { _ in
+                withAnimation(Motion.settle) {
+                    browser.place(group, at: target)
+                    draggingGroup = nil
+                    travel = 0
+                    span = 1
                 }
             }
     }

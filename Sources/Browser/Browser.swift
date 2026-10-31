@@ -103,6 +103,13 @@ final class Browser: NSObject, ObservableObject {
     /// Where the next ⇧-click measures its run from.
     var choiceAnchor: Tab.ID?
 
+    /// Each tab group's name and fold, by the id its tabs carry — see
+    /// Groups.swift. One set for every profile: a tab moved to another keeps
+    /// its group there.
+    @Published var groups: [UUID: TabGroup] = [:]
+    /// The group whose name is being typed, in its head.
+    @Published var editingGroup: UUID?
+
     /// Tabs to another profile, parked there asleep — the row closes over
     /// the gap. Landing on a neighbour first, through select(), so the page
     /// being left is put down the way it always is.
@@ -798,6 +805,7 @@ final class Browser: NSObject, ObservableObject {
 
     func pin(_ tab: Tab) {
         if tab.pin == nil {
+            tab.group = nil
             tab.pin = tab.monogram
             // Pinned tabs live at the head of the row, in the order they were
             // pinned, so their letters never move under your hand.
@@ -1122,6 +1130,7 @@ final class Browser: NSObject, ObservableObject {
         // Every profile's tabs are objects from the start — a line each, no
         // web view — so switching to one is a swap of arrays and nothing
         // is read from disk again.
+        for space in spaces { for group in space.groups ?? [] { groups[group.id] = group } }
         for (index, space) in spaces.enumerated() {
             var restored: [Tab] = []
             for entry in space.tabs {
@@ -1130,6 +1139,7 @@ final class Browser: NSObject, ObservableObject {
                 prepare(tab)
                 tab.restore(url: url, title: entry.title)
                 tab.pin = entry.pin
+                tab.group = entry.group.flatMap(UUID.init(uuidString:))
                 restored.append(tab)
             }
             if index == profile {
@@ -1763,7 +1773,8 @@ final class Browser: NSObject, ObservableObject {
                 // Counted among what is written: a private tab in front of
                 // it is not in the file, so it is not in the count.
                 if tab.id == front { active = entries.count }
-                entries.append(Session.Entry(url: url.absoluteString, title: tab.title, pin: tab.pin))
+                entries.append(Session.Entry(url: url.absoluteString, title: tab.title, pin: tab.pin,
+                                             group: group(of: tab)?.id.uuidString))
             }
             return (entries, active)
         }
@@ -1771,7 +1782,10 @@ final class Browser: NSObject, ObservableObject {
             let list = index == profile ? tabs : (parked[index]?.tabs ?? [])
             let front = index == profile ? activeID : parked[index]?.active
             let done = written(list, front: front)
-            return Session.Space(name: profileNames[index], tabs: done.entries, active: done.active)
+            let kept = Set(done.entries.compactMap(\.group))
+            let named = groups.values.filter { kept.contains($0.id.uuidString) }.sorted { $0.id.uuidString < $1.id.uuidString }
+            return Session.Space(name: profileNames[index], tabs: done.entries, active: done.active,
+                                 groups: named.isEmpty ? nil : named)
         }
         // Each other window as itself, where it was: it opens there again.
         // Their own tabs only: the pins are the space's, written above.
@@ -2040,6 +2054,16 @@ final class Browser: NSObject, ObservableObject {
         if tab.pin != nil { sharePins() } else { rememberSession() }
     }
 
+    /// The loose tabs in a new order, each group's tabs kept together as
+    /// drawn — see Groups.swift.
+    func arrange(_ loose: [Tab]) {
+        let pins = tabs.filter { $0.pin != nil }
+        tabs = pins + loose
+        let knit = order(of: slots)
+        if knit.map(\.id) != loose.map(\.id) { tabs = pins + knit }
+        rememberSession()
+    }
+
     func step(_ direction: Int) {
         guard tabs.count > 1, let here = tabs.firstIndex(where: { $0.id == activeID }) else { return }
         let next = (here + direction + tabs.count) % tabs.count
@@ -2062,6 +2086,8 @@ final class Browser: NSObject, ObservableObject {
         let tab = isPrivate ? freshTab() : Tab(configuration: Browser.extensionConfiguration(for: url))
         prepare(tab)
         if !atEnd { tab.opener = activeID }
+        // A link from a grouped tab opens in its group.
+        if !atEnd, let active, let kept = group(of: active) { tab.group = kept.id }
         tabs.insert(tab, at: atEnd ? tabs.count : slot(after: activeID))
         tab.go(to: url)
         if foreground {

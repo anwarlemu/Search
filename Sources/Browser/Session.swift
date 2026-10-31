@@ -10,6 +10,8 @@ enum Session {
         var url: String
         var title: String
         var pin: String?
+        /// Its tab group's id. Missing from older files.
+        var group: String? = nil
     }
 
     /// One profile: its tabs, and which of them was in front.
@@ -17,6 +19,8 @@ enum Session {
         var name: String
         var tabs: [Entry]
         var active: Int
+        /// Its tab groups' names and folds. Missing from older files.
+        var groups: [TabGroup]? = nil
     }
 
     struct Shape: Codable {
