@@ -573,6 +573,9 @@ struct ContentView: View {
             .onChange(of: browser.prefs.sidebar) { _, _ in
                 DispatchQueue.main.async { measureLights() }
             }
+            .onChange(of: lightsHidden) { _, _ in
+                measureLights()
+            }
             // Stepping away to another app: macOS draws its own resting
             // buttons, and on a light window they come out nearly white. Ours
             // go on in their place until the app comes back.
@@ -580,7 +583,6 @@ struct ContentView: View {
                 // Another app in front: the pointer is no longer over the page.
                 browser.active?.built?.pointerLeft()
                 measureLights()
-                resting?.isHidden = false
             }
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 resting?.isHidden = true
@@ -789,21 +791,30 @@ struct ContentView: View {
         browser.prefs.sidebar && browser.prefs.bare && browser.active?.immersed != true
     }
 
+    private var lightsHidden: Bool {
+        browser.active?.immersed == true || (tucked && !browser.peeking)
+    }
+
     /// The column has its own corner for the lights, so the page beside it
     /// starts at the very top; the strip needs a band.
     private var band: CGFloat {
-        // With the tabs put away the page has the top too; the lights sit
-        // over its corner, as they do over a full-screen page.
+        // With the tabs put away the page has the top too.
         guard browser.active?.immersed != true else { return 0 }
         return browser.prefs.sidebar ? 0 : Metrics.strip
     }
 
-    /// Put the resting circles in the title bar, exactly over the buttons.
+    /// Keep the buttons and their resting circles in step with the sidebar.
     private func measureLights() {
         guard let window,
               let close = window.standardWindowButton(.closeButton),
               let titlebar = close.superview
         else { return }
+
+        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+            .compactMap { window.standardWindowButton($0) }
+        for button in buttons where button.isHidden != lightsHidden {
+            button.isHidden = lightsHidden
+        }
 
         let view = resting ?? RestingLights()
         if view.superview !== titlebar {
@@ -812,10 +823,8 @@ struct ContentView: View {
             titlebar.addSubview(view, positioned: .above, relativeTo: nil)
             resting = view
         }
-        view.spots = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
-            .compactMap { window.standardWindowButton($0) }
-            .map { $0.convert($0.bounds, to: titlebar) }
-        view.isHidden = NSApp.isActive
+        view.spots = buttons.map { $0.convert($0.bounds, to: titlebar) }
+        view.isHidden = lightsHidden || NSApp.isActive
     }
 
     private func dress(_ window: NSWindow) {
