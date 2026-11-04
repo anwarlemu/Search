@@ -245,6 +245,17 @@ final class StageView: NSView {
         settle()
     }
 
+    /// A smaller window does not always bring a layout pass with it: SwiftUI
+    /// can hand this view a new size without asking it to lay out again, and
+    /// the page went on at the old width, running off the window's edge. A
+    /// change of size is therefore taken as the moment to fit the page, and
+    /// the page is also tied to this view's edges so AppKit carries it along
+    /// in between.
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        settle()
+    }
+
     func show(_ page: NSView?, keeping: [NSView] = []) {
         wanted = page
         kept.removeAllObjects()
@@ -272,7 +283,8 @@ final class StageView: NSView {
         }
 
         guard let wanted, window != nil else { return }
-        wanted.frame = bounds
+        if wanted.frame != bounds { wanted.frame = bounds }
+        wanted.autoresizingMask = [.width, .height]
         wanted.isHidden = false
         if wanted.superview !== self {
             // A web view can have only one superview, so taking it back is how
