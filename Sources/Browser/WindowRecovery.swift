@@ -87,6 +87,14 @@ final class WindowWatch {
                 }
             })
         }
+        // The app put away as a whole (17 Nov 2026: a right-click on Google
+        // Images hid it). Who asked, and on what event, is what the line keeps.
+        tokens.append(centre.addObserver(forName: NSApplication.willHideNotification, object: nil, queue: .main) { [weak window] _ in
+            MainActor.assumeIsolated {
+                let event = NSApp.currentEvent.map { "type=\($0.type.rawValue) mods=\($0.modifierFlags.rawValue) clicks=\($0.type == .leftMouseDown || $0.type == .rightMouseDown ? $0.clickCount : 0)" } ?? "none"
+                WindowJournal.record("app-will-hide event[\(event)]", window: window, stack: Thread.callStackSymbols)
+            }
+        })
         tokens.append(centre.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak browser, weak window] _ in
             MainActor.assumeIsolated {
                 guard let browser, let window, browser.window === window else { return }

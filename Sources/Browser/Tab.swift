@@ -1235,6 +1235,7 @@ final class PageView: WKWebView {
     /// What extensions added to the right-click menu, at the end of it.
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
         menuOpened = Date()
+        WindowJournal.record("menu-open items=\(menu.items.count)", window: window)
         super.willOpenMenu(menu, with: event)
         offerWindow(in: menu)
         offerImage(in: menu)
@@ -1254,6 +1255,7 @@ final class PageView: WKWebView {
     /// the pointer is.
     func menuRefused(_ url: URL) {
         let asked = Date()
+        WindowJournal.record("menu-refused", window: window)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self, let window, menuOpened < asked.addingTimeInterval(-1),
                   let owner = Browser.every.allObjects.first(where: { $0.tabs.contains { $0.built === self } }),
@@ -1264,6 +1266,7 @@ final class PageView: WKWebView {
             let menu = NSMenu()
             items.forEach { menu.addItem($0) }
             let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            WindowJournal.record("menu-own", window: window)
             menu.popUp(positioning: nil, at: point, in: self)
         }
     }
