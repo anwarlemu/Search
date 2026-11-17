@@ -54,17 +54,40 @@ final class Lights: NSObject {
         ] {
             centre.addObserver(self, selector: #selector(place), name: name, object: window)
         }
-        // The title bar's own views moving is the surest sign AppKit has just
-        // laid them out again.
-        let buttons = self.buttons
-        if let bar = buttons.first?.superview, let container = bar.superview {
-            for view in [container, bar] + buttons {
-                view.postsFrameChangedNotifications = true
-                centre.addObserver(self, selector: #selector(place), name: NSView.frameDidChangeNotification, object: view)
-            }
+        // Coming back from another app, AppKit redraws the buttons for the
+        // active state and can lay them out again as it does.
+        for name in [NSApplication.didBecomeActiveNotification, NSApplication.didResignActiveNotification] {
+            centre.addObserver(self, selector: #selector(place), name: name, object: nil)
         }
+        watch()
         place()
     }
+
+    /// The title bar's views being watched for moves.
+    private var watched: [ObjectIdentifier] = []
+
+    /// The title bar's own views moving is the surest sign AppKit has just
+    /// laid them out again. AppKit sometimes builds its title bar afresh — out
+    /// of full screen, after the buttons were hidden and shown — and the new
+    /// views were never watched, so a later layout left the three wherever
+    /// AppKit had put them, scattered (17 Nov 2026). Whatever views are there
+    /// now are the ones watched.
+    private func watch() {
+        let buttons = self.buttons
+        guard let bar = buttons.first?.superview, let container = bar.superview else { return }
+        let views = [container, bar] + buttons
+        let ids = views.map(ObjectIdentifier.init)
+        guard ids != watched else { return }
+        let centre = NotificationCenter.default
+        centre.removeObserver(self, name: NSView.frameDidChangeNotification, object: nil)
+        for view in views {
+            view.postsFrameChangedNotifications = true
+            centre.addObserver(self, selector: #selector(place), name: NSView.frameDidChangeNotification, object: view)
+        }
+        watched = ids
+    }
+
+    private var again = false
 
     private var buttons: [NSButton] {
         [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { window?.standardWindowButton($0) }
@@ -78,6 +101,18 @@ final class Lights: NSObject {
         guard buttons.count == 3, let bar = buttons[0].superview, let container = bar.superview else { return }
         placing = true
         defer { placing = false }
+        watch()
+        // AppKit moves the three one at a time; the pass that answers the
+        // first move can run before the last. One more look on the next turn
+        // puts right whatever moved after.
+        if !again {
+            again = true
+            DispatchQueue.main.async { [weak self] in
+                // Still marked, so this look does not ask for another.
+                self?.place()
+                self?.again = false
+            }
+        }
 
         // A title bar as tall as the strip, so the buttons can sit lower in it.
         let height = Metrics.strip
