@@ -882,22 +882,8 @@ final class Extensions: NSObject, ObservableObject {
         }
     }
 
-    /// Starts the extension's worker before its popup asks for it. WebKit
-    /// puts a worker to sleep after half a minute idle and wakes it only for
-    /// the popup's first message; a big one (NordVPN's is 2 MB) then spends
-    /// the popup's first seconds starting over. The pointer reaching the
-    /// button is a head start; a worker already up costs nothing.
-    private var warmed: [String: Date] = [:]
-    func warm(_ id: String) {
-        guard let context = contexts[id], context.webExtension.hasBackgroundContent,
-              Date().timeIntervalSince(warmed[id] ?? .distantPast) > 5 else { return }
-        warmed[id] = Date()
-        context.loadBackgroundContent { _ in }
-    }
-
     func press(_ id: String) {
         guard let context = contexts[id] else { return }
-        warm(id)
         if let tab = activeAdapter { context.userGesturePerformed(in: tab) }
         // An extension that asked for its button to open its side panel.
         if ExtensionShims.panelOnClick.contains(id), context.action(for: activeAdapter)?.presentsPopup != true {
@@ -1213,10 +1199,7 @@ private struct ExtensionButtons: View {
                     .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .buttonStyle(.plain)
-            .onHover {
-                hovering = $0
-                if $0 { Extensions.shared.warm(button.id) }
-            }
+            .onHover { hovering = $0 }
             .help(button.label)
         }
     }
@@ -1389,10 +1372,7 @@ private struct ExtensionMenu: View {
                 let id = button.id
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { extensions.press(id) }
             }
-            .onHover {
-                hovering = $0
-                if $0 { extensions.warm(button.id) }
-            }
+            .onHover { hovering = $0 }
             .help(button.label)
             .contextMenu { ExtensionActions(id: button.id, name: button.name, extensions: extensions) }
         }
