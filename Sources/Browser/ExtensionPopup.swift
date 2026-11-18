@@ -36,6 +36,8 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     func show(_ url: URL, for context: WKWebExtensionContext, from anchor: NSView?) {
         close()
         guard let configuration = context.webViewConfiguration else { return }
+        opened = Date()
+        WindowJournal.record("popup-open \(context.uniqueIdentifier.prefix(8))")
         // Sized the way Chrome sizes a popup (see preferred), unseen, while
         // the popover stands at a guess; then shown. It has to be in the
         // window meanwhile: WebKit suspends a page that is in none.
@@ -104,6 +106,8 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         Store.settings.set([size.width, size.height], forKey: "extensions.popup.\(id)")
     }
     private var shown = false
+    /// When the popup was asked for, for the journal's timings.
+    private var opened = Date()
 
     /// The page, at the popover's size, in view.
     private func reveal() {
@@ -195,6 +199,7 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     @objc(_webView:navigationDidFinishDocumentLoad:)
     func webView(_ webView: WKWebView, navigationDidFinishDocumentLoad navigation: WKNavigation?) {
         guard webView === web else { return }
+        WindowJournal.record("popup-document \(Int(Date().timeIntervalSince(opened) * 1000))ms")
         firstMeasure()
     }
 
