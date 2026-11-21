@@ -121,9 +121,19 @@ final class WindowWatch {
 enum WindowJournal {
     private static let queue = DispatchQueue(label: "browser.window-log", qos: .utility)
 
+    /// The modifier keys down right now, as the system has them: macOS hides,
+    /// minimizes and changes desktop on its own for an Option-click, and
+    /// those came with right-clicks here (21 Nov 2026).
+    static func held() -> String {
+        let flags = NSEvent.modifierFlags
+        let names: [(NSEvent.ModifierFlags, String)] = [(.control, "ctrl"), (.option, "opt"), (.command, "cmd"), (.shift, "shift"), (.function, "fn")]
+        let down = names.filter { flags.contains($0.0) }.map(\.1)
+        return down.isEmpty ? "-" : down.joined(separator: "+")
+    }
+
     @MainActor
     static func record(_ event: String, window: NSWindow? = nil, stack: [String] = []) {
-        var line = "\(Date()) pid=\(ProcessInfo.processInfo.processIdentifier) \(event) active=\(NSApp.isActive) hidden=\(NSApp.isHidden)"
+        var line = "\(Date()) pid=\(ProcessInfo.processInfo.processIdentifier) \(event) active=\(NSApp.isActive) hidden=\(NSApp.isHidden) keys=\(WindowJournal.held())"
         if let window {
             line += " window=\(window.windowNumber) class=\(type(of: window)) visible=\(window.isVisible) mini=\(window.isMiniaturized) occluded=\(!window.occlusionState.contains(.visible)) space=\(window.isOnActiveSpace) alpha=\(window.alphaValue) frame=\(NSStringFromRect(window.frame)) fullscreen=\(window.styleMask.contains(.fullScreen)) content=\(window.contentView != nil)"
         }
