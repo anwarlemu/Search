@@ -125,7 +125,7 @@ final class Lights: NSObject {
 
         // A title bar as tall as the strip, so the buttons can sit lower in it.
         // Upright, the bar is grown to hold all three.
-        let height = upright ? Lights.centre.y * 2 + 2 * spacing : Metrics.strip
+        let height = upright ? Metrics.railLights : Metrics.strip
         var frame = container.frame
         if frame.height != height || frame.maxY != window.frame.height {
             frame.size.height = height
@@ -138,7 +138,7 @@ final class Lights: NSObject {
             let origin = upright
                 ? NSPoint(
                     x: Metrics.rail / 2 - size.width / 2,
-                    y: bar.bounds.height - Lights.centre.y - size.height / 2 - CGFloat(index) * spacing
+                    y: bar.bounds.height - 22 - size.height / 2 - CGFloat(index) * spacing
                 )
                 : NSPoint(
                     x: Lights.centre.x - size.width / 2 + CGFloat(index) * spacing,

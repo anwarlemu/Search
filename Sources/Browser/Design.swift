@@ -131,7 +131,9 @@ enum Metrics {
     static let sideMax: CGFloat = 440
     /// The column folded by ⌘S: the lights stood on end, the three doors
     /// under them, and every tab as its mark alone.
-    static let rail: CGFloat = 64
+    static let rail: CGFloat = 52
+    /// The band the three take, stacked, at the rail's top.
+    static let railLights: CGFloat = 80
 }
 
 // One spring for anything that moves between two places, one for anything that
