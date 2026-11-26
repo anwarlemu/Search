@@ -566,22 +566,25 @@ private struct PinSquare: View, Equatable {
     /// stays put — so the glyph sits at its usual size, centred, rather than
     /// stretching to chase the width.
     private var scale: CGFloat { min(width, height) }
+    /// The glyph's box, in whole points so the badge on its corner lands on
+    /// the pixel grid.
+    private var glyph: CGFloat { (scale * 18 / 42).rounded() }
 
     var body: some View {
         Group {
             if lettering {
                 PinField(browser: browser, tab: tab)
             } else if icons, let icon = tab.icon {
-                Mark(icon: icon, letter: tab.pin ?? "", size: scale * 18 / 42, dim: tab.asleep)
+                Mark(icon: icon, letter: tab.pin ?? "", size: glyph, dim: tab.asleep)
             } else {
                 Text(tab.pin ?? "")
                     .font(.system(size: scale * 14 / 42, weight: .medium))
                     .foregroundStyle((live ? Palette.ink : Palette.muted).opacity(tab.asleep ? 0.45 : 1))
             }
         }
-        .frame(width: scale * 18 / 42, height: scale * 18 / 42)
+        .frame(width: glyph, height: glyph)
         // What its page counts as waiting (UnreadBadge.swift).
-        .unreadBadge(lettering ? nil : tab.unread, icon: scale * 18 / 42,
+        .unreadBadge(lettering ? nil : tab.unread, icon: glyph,
                      ring: live ? Palette.wash : hovering ? Palette.hover : Palette.wash.opacity(0.55))
         .frame(width: width, height: height)
         .background {

@@ -9,17 +9,25 @@ struct UnreadBadge: View {
     var icon: CGFloat = 16
     var ring: Color
 
+    /// Whole points, so the circle and the figure in it land on the pixel
+    /// grid: a fractional size left the figure a hair off centre.
+    private var size: CGFloat { max(11, (icon * 0.66).rounded()) }
+
     var body: some View {
         Text(count)
-            .font(.system(size: max(7, icon * 0.45), weight: .bold).monospacedDigit())
+            // Rounded, proportional figures: a tabular 1 sits in a 0's
+            // width with its flag pulling it left of the middle.
+            .font(.system(size: (size * 0.64).rounded(), weight: .semibold, design: .rounded))
             .foregroundStyle(.white)
             .lineLimit(1)
             .fixedSize()
-            .padding(.horizontal, icon * 0.14)
-            .frame(minWidth: icon * 0.7, minHeight: icon * 0.7)
-            .fixedSize()
+            .padding(.horizontal, (size * 0.28).rounded())
+            // One figure, a circle; more, a capsule of the same height.
+            .frame(minWidth: size)
+            .frame(height: size)
             .background(Capsule().fill(Color(red: 0.93, green: 0.24, blue: 0.21)))
             .background(Capsule().fill(ring).padding(-1.5))
+            .fixedSize()
             .allowsHitTesting(false)
             .accessibilityLabel(Text("\(count) unread"))
     }
@@ -34,7 +42,7 @@ extension View {
                 Color.clear
                     .frame(width: 0, height: 0)
                     .overlay { UnreadBadge(count: count, icon: icon, ring: ring) }
-                    .offset(x: icon * 0.15, y: -icon * 0.12)
+                    .offset(x: (icon * 0.15).rounded(), y: -(icon * 0.12).rounded())
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
             }
         }
