@@ -2896,6 +2896,12 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     /// reload to fetch, because there is no longer an address to fetch.
     func webViewDidClose(_ webView: WKWebView) {
         guard let tab = tab(for: webView) else { return }
+        // A tab you opened yourself is not the page's to close. WebKit lets
+        // a page close any tab whose history is one page long, and a sign-in
+        // that comes back by redirects leaves exactly that — a pin included,
+        // which this used to unpin and close. Only a tab a page opened (it
+        // has an opener) closes itself (as upstream Search, idea 1251).
+        guard tab.opener != nil else { return }
         // Back to whoever opened it, so you land where you started the sign-in
         // rather than wherever the row happens to put you.
         if let opener = tab.opener, let home = tabs.first(where: { $0.id == opener }) {
@@ -2989,6 +2995,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard let tab = tab(for: webView), let url = tab.address else { return }
+        LookupRetry.shared.stop(tab)
         tab.invalidateNavigation()
         tab.uncover()
         tellStore(tab)
@@ -3016,7 +3023,15 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // page didn't load" over a download that had worked — clicked again,
         // it downloaded again.
         guard !(nsError.domain == "WebKitErrorDomain" && code == 102) else { return }
-        tab(for: webView)?.failure = message(for: code)
+        guard let tab = tab(for: webView) else { return }
+        // A site that blinked is asked for again by itself (Retry.swift).
+        let failing = nsError.userInfo[NSURLErrorFailingURLErrorKey] as? URL
+        let history = history
+        if let trying = LookupRetry.shared.failed(tab, url: failing, code: code, known: { history.knows(host: $0) }) {
+            tab.failure = trying
+            return
+        }
+        tab.failure = message(for: code)
     }
 
     private func message(for code: Int) -> String {

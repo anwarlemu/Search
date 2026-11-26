@@ -839,6 +839,12 @@ struct ContentView: View {
         }
         // Light or dark is the app's to say (Settings › Appearance); the
         // window only has to be the ground colour that goes with it.
+        // No picture of the window for macOS's state restoration: Browser
+        // brings its windows back itself, from its own files. AppKit drew one
+        // a while after launch and after each change, a buffer the window's
+        // size in pixels (about 20 MB at 1512 points on a Retina screen) that
+        // the app then kept (from upstream Search).
+        window.disableSnapshotRestoration()
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.backgroundColor = Palette.NS.ground

@@ -236,7 +236,25 @@ final class Tab: ObservableObject, Identifiable {
     /// True while something on the page is making noise, so the row can say
     /// which tab it is coming from.
     @Published var noisy = false {
-        didSet { if noisy, !oldValue { onNoise?(self) } }
+        didSet {
+            if noisy, !oldValue { onNoise?(self) }
+            if noisy != oldValue { hushLater() }
+        }
+    }
+
+    /// Quiet for a while after playing: what played is muted, so the
+    /// keyboard's media keys go back to the app that had them (MediaKeys).
+    private var hushing: DispatchWorkItem?
+    private func hushLater() {
+        hushing?.cancel()
+        hushing = nil
+        guard !noisy else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.noisy, let web = self.built else { return }
+            web.evaluateJavaScript(MediaKeys.hush, in: nil, in: MediaKeys.world) { _ in }
+        }
+        hushing = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + MediaKeys.wait, execute: work)
     }
     /// The page has started making sound: the browser keeps it as the one
     /// playing (see NowPlaying.swift).
@@ -579,6 +597,9 @@ final class Tab: ObservableObject, Identifiable {
         )
         controller.addUserScript(
             WKUserScript(source: NowPlaying.watch, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        )
+        controller.addUserScript(
+            WKUserScript(source: MediaKeys.watch, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: MediaKeys.world)
         )
         controller.addUserScript(
             WKUserScript(source: StoreRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true)

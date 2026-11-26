@@ -102,6 +102,11 @@ final class History: ObservableObject {
         Array(indexed.lazy.filter { $0.visit.inferred != true }.prefix(max(0, count)).map(\.trace))
     }
 
+    /// Whether a page of this host has been visited.
+    func knows(host: String) -> Bool {
+        indexed.contains { $0.trace.url.host()?.lowercased() == host }
+    }
+
     func everything(matching typed: String = "") -> [Trace] {
         let needle = typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return indexed.filter { $0.visit.inferred != true && (needle.isEmpty || $0.search.contains(needle)) }.map(\.trace)
