@@ -283,6 +283,9 @@ final class Browser: NSObject, ObservableObject {
     let keys = Browser.sharedKeys
     /// The tucked-away column, out over the page while the pointer is on it.
     @Published var peeking = false
+    /// The tab that last started making sound, for the card at the foot of
+    /// the column (NowPlaying.swift). Kept while it is paused.
+    @Published var playing: Tab.ID?
     /// The settings panel.
     @Published var tuning = false
     /// The first-launch walk-through, over everything. Also from the menu.
@@ -346,7 +349,10 @@ final class Browser: NSObject, ObservableObject {
         // Only the column tucks away; tabs across the top have nowhere to go.
         guard prefs.sidebar else { return }
         peeking = false
-        withAnimation(Motion.glide) { prefs.bare.toggle() }
+        // Folded to the rail at once: a key's answer doesn't animate.
+        var quiet = Transaction()
+        quiet.disablesAnimations = true
+        withTransaction(quiet) { prefs.bare.toggle() }
     }
 
     /// ⌥⌘I. WebKit's inspector over the page.
@@ -2313,6 +2319,7 @@ final class Browser: NSObject, ObservableObject {
             announce("Hidden — ⌘Z puts it back")
         }
         tab.onPickEnd = { [weak self] _ in self?.veiling = false }
+        tab.onNoise = { [weak self] tab in self?.playing = tab.id }
         tab.onNotifyAsk = { [weak self] tab, host in self?.notifyAsked(tab, host: host) }
         tab.onNotify = { [weak self] tab, host, title, body, tag in
             self?.notifyShow(tab, host: host, title: title, body: body, tag: tag)

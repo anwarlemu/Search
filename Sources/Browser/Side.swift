@@ -91,10 +91,17 @@ struct SideBar: View {
                 .padding(.horizontal, 10)
             }
 
-            VStack {
+            VStack(spacing: 8) {
                 Spacer()
+                if let tab = browser.playingTab {
+                    NowPlayingCard(browser: browser, tab: tab)
+                        .id(tab.id)
+                        .padding(.horizontal, 10)
+                        .transition(.opacity)
+                }
                 foot
             }
+            .animation(Motion.quick, value: browser.playingTab?.id)
         }
         .frame(width: prefs.sideWidth)
         .frame(maxHeight: .infinity)
@@ -197,7 +204,8 @@ struct SideBar: View {
     /// and scroll inside it, the pins above and the foot below staying put.
     /// Fifteen or so tabs used to run off the bottom (2 Oct 2026).
     private func rows(in height: CGFloat) -> some View {
-        let room = max(0, height - Metrics.strip - pinBlock - SideBar.foot)
+        let card = browser.playingTab == nil ? 0 : NowPlaying.height
+        let room = max(0, height - Metrics.strip - pinBlock - SideBar.foot - card)
         let scrolls = looseHeight > room + 0.5
         return ScrollViewReader { reader in
             ScrollView(showsIndicators: false) {

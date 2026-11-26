@@ -235,7 +235,12 @@ final class Tab: ObservableObject, Identifiable {
 
     /// True while something on the page is making noise, so the row can say
     /// which tab it is coming from.
-    @Published var noisy = false
+    @Published var noisy = false {
+        didSet { if noisy, !oldValue { onNoise?(self) } }
+    }
+    /// The page has started making sound: the browser keeps it as the one
+    /// playing (see NowPlaying.swift).
+    var onNoise: ((Tab) -> Void)?
     /// Silenced from the row or with ⇧⌘M. Kept when the page sleeps and
     /// wakes; the page itself plays on, unheard.
     @Published private(set) var muted = false
@@ -571,6 +576,9 @@ final class Tab: ObservableObject, Identifiable {
         )
         controller.addUserScript(
             WKUserScript(source: ImageRelay.watch, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        )
+        controller.addUserScript(
+            WKUserScript(source: NowPlaying.watch, injectionTime: .atDocumentStart, forMainFrameOnly: true)
         )
         controller.addUserScript(
             WKUserScript(source: StoreRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true)

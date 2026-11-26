@@ -398,6 +398,10 @@ struct ContentView: View {
                 if sidebar {
                     SideBar(browser: browser, prefs: browser.prefs)
                         .transition(.move(edge: .leading))
+                } else if tucked {
+                    // Folded by ⌘S: at once, no slide (see Rail).
+                    Rail(browser: browser, prefs: browser.prefs)
+                        .transition(.identity)
                 }
 
                 VStack(spacing: 0) {
@@ -441,38 +445,9 @@ struct ContentView: View {
                 TabBar(browser: browser)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-            // With the column put away, the lights' corner is still there to
-            // take hold of the window by, and the left edge brings the
-            // column out over the page for as long as the pointer is on it.
-            if tucked {
-                DragStrip()
-                    .frame(width: Metrics.lights, height: Metrics.strip)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 0) {
-                    Color.clear
-                        .frame(width: 6)
-                        .frame(maxHeight: .infinity)
-                        .contentShape(Rectangle())
-                        .onHover { if $0 { browser.peeking = true } }
-                        .padding(.top, Metrics.strip)
-                    Spacer(minLength: 0)
-                }
-                if browser.peeking {
-                    HStack(spacing: 0) {
-                        SideBar(browser: browser, prefs: browser.prefs)
-                            .background(Palette.ground)
-                            .shadow(color: .black.opacity(0.18), radius: 24, x: 6)
-                            .onHover { if !$0 { browser.peeking = false } }
-                        Spacer(minLength: 0)
-                    }
-                    .transition(.move(edge: .leading))
-                }
-            }
         }
         .ignoresSafeArea()
         .animation(Motion.glide, value: browser.prefs.sidebar)
-        .animation(Motion.glide, value: browser.prefs.bare)
-        .animation(Motion.settle, value: browser.peeking)
         .animation(.easeOut(duration: 0.12), value: browser.active?.immersed)
     }
 
@@ -574,6 +549,9 @@ struct ContentView: View {
                 DispatchQueue.main.async { measureLights() }
             }
             .onChange(of: lightsHidden) { _, _ in
+                measureLights()
+            }
+            .onChange(of: tucked) { _, _ in
                 measureLights()
             }
             // Stepping away to another app: macOS draws its own resting
@@ -792,7 +770,7 @@ struct ContentView: View {
     }
 
     private var lightsHidden: Bool {
-        browser.active?.immersed == true || (tucked && !browser.peeking)
+        browser.active?.immersed == true
     }
 
     /// The column has its own corner for the lights, so the page beside it
@@ -810,6 +788,7 @@ struct ContentView: View {
               let titlebar = close.superview
         else { return }
 
+        Lights.stand(window, tucked)
         let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
             .compactMap { window.standardWindowButton($0) }
         for button in buttons where button.isHidden != lightsHidden {

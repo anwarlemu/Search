@@ -451,16 +451,18 @@ struct Helm: View, Equatable {
     /// then redraw when the tab changes and not with every keystroke in the
     /// address field (2 Oct 2026).
     let tab: Tab?
+    /// Stacked, in the folded column (see Rail.swift).
+    var vertical = false
 
-    static func == (a: Helm, b: Helm) -> Bool { a.browser === b.browser && a.tab === b.tab }
+    static func == (a: Helm, b: Helm) -> Bool { a.browser === b.browser && a.tab === b.tab && a.vertical == b.vertical }
 
     var body: some View {
         if let tab {
-            Wheel(browser: browser, tab: tab)
+            Wheel(browser: browser, tab: tab, vertical: vertical)
         } else {
             // Nowhere to go and nothing to reload: the doors stay in place,
             // greyed, so the row doesn't shift when a tab arrives.
-            HStack(spacing: 2) {
+            (vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 2))) {
                 Door(icon: "chevron.left") {}
                 Door(icon: "chevron.right") {}
                 Door(icon: "arrow.clockwise") {}
@@ -473,11 +475,12 @@ struct Helm: View, Equatable {
     private struct Wheel: View {
         let browser: Browser
         @ObservedObject var tab: Tab
+        let vertical: Bool
 
         var body: some View {
             let back = !tab.isBlank && tab.canGoBack
             let forward = !tab.isBlank && tab.canGoForward
-            HStack(spacing: 2) {
+            (vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 2))) {
                 // Held, or right-clicked, each lists the pages that way;
                 // ⌘-click opens the next one beside this tab — Safari and
                 // Chrome both.
