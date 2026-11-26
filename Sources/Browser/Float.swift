@@ -962,6 +962,10 @@ enum Isolate {
         if (v.paused || v.ended || v.readyState < 2) continue;
         var box = v.getBoundingClientRect();
         if (choosy && (v.muted || v.volume === 0 || box.width < 200 || box.height < 112)) continue;
+        // On its own, only a video somebody watches: not a short loop or a
+        // hover preview — under half a minute — that happens to have sound.
+        // A live stream has no end and counts (from upstream Search, 1248).
+        if (choosy && (v.loop || (isFinite(v.duration) && v.duration < 30))) continue;
         if (box.width * box.height >= area) { area = box.width * box.height; best = v; }
       }
       if (!best) return 'none';

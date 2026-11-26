@@ -283,6 +283,10 @@ final class Browser: NSObject, ObservableObject {
     let keys = Browser.sharedKeys
     /// The tucked-away column, out over the page while the pointer is on it.
     @Published var peeking = false
+    /// The tab whose Site Information is open (SiteInfo.swift).
+    @Published var inspecting: Tab.ID?
+    /// Keep This Site Awake in a private window: that window's alone.
+    @Published var privateAwake: Set<String> = []
     /// The tab that last started making sound, for the card at the foot of
     /// the column (NowPlaying.swift). Kept while it is paused.
     @Published var playing: Tab.ID?
@@ -579,6 +583,23 @@ final class Browser: NSObject, ObservableObject {
         guard let tab = tabs.first(where: { $0.id == suggesting?.tab }) ?? active else { return }
         suggesting = nil
         pickedInto = tab.id
+        // With Touch ID asked for, the secret isn't even read until the
+        // owner has said yes, and a cancel fills nothing (from upstream
+        // Search, idea 993).
+        guard prefs.asksBeforeFilling else { return fill(login, into: tab) }
+        Vault.FillProof.ask(login.host) { [weak self, weak tab] ok in
+            guard ok, let self, let tab else { return }
+            self.fill(login, into: tab)
+        }
+    }
+
+    /// A kept account into the page it was picked for — if that tab is still
+    /// on that site: the question may have stood a while.
+    private func fill(_ login: Login, into tab: Tab) {
+        guard tabs.contains(where: { $0.id == tab.id }),
+              let here = tab.address?.host()?.lowercased(),
+              Vault.registrable(here) == Vault.registrable(login.host.lowercased())
+        else { return }
         Vault.off({ Vault.secret(of: login) }) { [weak tab] password in
             guard let tab, let password else { return }
             tab.fill(user: login.user, password: password) { [weak self] worked in
@@ -2142,6 +2163,12 @@ final class Browser: NSObject, ObservableObject {
         } else {
             open(url, foreground: true)
         }
+    }
+
+    /// A bookmarks folder opened whole: each page in a tab behind this one.
+    func openAll(_ urls: [URL]) {
+        for url in urls { _ = open(url, foreground: false, atEnd: true) }
+        announce(urls.count == 1 ? "Opened 1 tab" : "Opened \(urls.count) tabs")
     }
 
     /// A bookmark, or a page from a list of them: into the tab you are on,

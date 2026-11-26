@@ -580,6 +580,9 @@ private struct PinSquare: View, Equatable {
             }
         }
         .frame(width: scale * 18 / 42, height: scale * 18 / 42)
+        // What its page counts as waiting (UnreadBadge.swift).
+        .unreadBadge(lettering ? nil : tab.unread, icon: scale * 18 / 42,
+                     ring: live ? Palette.wash : hovering ? Palette.hover : Palette.wash.opacity(0.55))
         .frame(width: width, height: height)
         .background {
             if live {

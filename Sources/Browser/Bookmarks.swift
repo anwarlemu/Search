@@ -237,6 +237,10 @@ final class Bookmarks: ObservableObject {
 /// in the full manager — the interaction is the same size either way.
 struct BookmarkOutline: View {
     @ObservedObject var bookmarks: Bookmarks
+    /// Every page in a folder, each in a tab behind the one you are on: a
+    /// folder ⌘-clicked or middle-clicked, or Open All from its menu, as
+    /// Chrome does (from upstream Search, idea 959).
+    var openAll: (([URL]) -> Void)? = nil
     let open: (URL) -> Void
 
     @State private var expanded: Set<Bookmark.ID> = []
@@ -262,6 +266,8 @@ struct BookmarkOutline: View {
                 isOpen: expanded.contains(node.id),
                 dragging: dragging == node.id,
                 toggle: node.isFolder ? { toggle(node.id) } : nil,
+                openAll: node.isFolder && openAll != nil && !BookmarkOutline.pages(in: node).isEmpty
+                    ? { openAll?(BookmarkOutline.pages(in: node)) } : nil,
                 moveTargets: Bookmarks.folders(bookmarks.roots).filter { !Bookmarks.holds($0.node.id, node) },
                 moveTo: { bookmarks.move(node.id, into: $0) },
                 remove: { bookmarks.remove(node.id) }
@@ -285,6 +291,13 @@ struct BookmarkOutline: View {
                         .padding(.vertical, 5)
                 }
             }
+        }
+    }
+
+    /// A folder's pages, its folders' too, in order.
+    static func pages(in node: Bookmark) -> [URL] {
+        (node.children ?? []).flatMap { child -> [URL] in
+            child.isFolder ? pages(in: child) : child.url.flatMap(URL.init(string:)).map { [$0] } ?? []
         }
     }
 
@@ -333,6 +346,7 @@ struct BookmarkOutline: View {
         let isOpen: Bool
         let dragging: Bool
         let toggle: (() -> Void)?
+        let openAll: (() -> Void)?
         let moveTargets: [(node: Bookmark, depth: Int)]
         let moveTo: (Bookmark.ID?) -> Void
         let remove: () -> Void
@@ -374,11 +388,23 @@ struct BookmarkOutline: View {
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(hovering ? Palette.wash : .clear))
             .contentShape(Rectangle())
             .opacity(dragging ? 0.35 : 1)
-            .onTapGesture { open?() ?? toggle?() }
+            .onTapGesture {
+                // ⌘-click on a folder: everything in it, in tabs.
+                if let openAll, NSApp.currentEvent?.modifierFlags.contains(.command) == true {
+                    openAll()
+                    return
+                }
+                open?() ?? toggle?()
+            }
+            .overlay { if let openAll { MiddleClick(act: openAll) } }
             .onHover { hovering = $0 }
             .contextMenu {
                 if let open {
                     Button("Open", action: open)
+                    Divider()
+                }
+                if let openAll {
+                    Button("Open All in Tabs", action: openAll)
                     Divider()
                 }
                 Menu("Move to") {
@@ -415,7 +441,10 @@ struct BookmarksDropdown: View {
                     .padding(14)
             } else {
                 ScrollView {
-                    BookmarkOutline(bookmarks: bookmarks) { url in
+                    BookmarkOutline(bookmarks: bookmarks, openAll: { urls in
+                        browser.bookmarking = false
+                        browser.openAll(urls)
+                    }) { url in
                         browser.bookmarking = false
                         browser.visit(url)
                     }
@@ -485,7 +514,10 @@ struct BookmarksPanel: View {
             } else {
                 ScrollView(showsIndicators: false) {
                     Card {
-                        BookmarkOutline(bookmarks: bookmarks) { url in
+                        BookmarkOutline(bookmarks: bookmarks, openAll: { urls in
+                            browser.bookmarking = false
+                            browser.openAll(urls)
+                        }) { url in
                             browser.bookmarking = false
                             browser.visit(url)
                         }
@@ -530,5 +562,28 @@ struct BookmarksPanel: View {
             }
         }
         .onAppear { Chromium.installed { sources = $0 } }
+    }
+}
+
+/// A middle-click on whatever it is laid over; every other click goes
+/// through to what is underneath.
+struct MiddleClick: NSViewRepresentable {
+    let act: () -> Void
+
+    func makeNSView(context: Context) -> Catcher { Catcher() }
+    func updateNSView(_ view: Catcher, context: Context) { view.act = act }
+
+    final class Catcher: NSView {
+        var act: (() -> Void)?
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            switch NSApp.currentEvent?.type {
+            case .otherMouseDown, .otherMouseUp: return super.hitTest(point)
+            default: return nil
+            }
+        }
+        override func otherMouseDown(with event: NSEvent) {}
+        override func otherMouseUp(with event: NSEvent) {
+            if event.buttonNumber == 2 { act?() } else { super.otherMouseUp(with: event) }
+        }
     }
 }

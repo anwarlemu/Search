@@ -584,6 +584,8 @@ private struct TabPill: View, Equatable {
                     }
                 }
                 .frame(width: 16, height: 16)
+                // What its page counts as waiting (UnreadBadge.swift).
+                .unreadBadge(lettering ? nil : tab.unread, icon: 16, ring: Palette.ground)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 6)
                 .frame(width: span)
@@ -923,6 +925,14 @@ struct TabMenu: View {
             }
             .disabled(tab.isBlank)
             Divider()
+        }
+        if tab.awakeHost != nil {
+            Button("Site Information…") { browser.inspecting = tab.id }
+        }
+        if let host = tab.awakeHost, tab.pin == nil {
+            // A pin never sleeps already.
+            Toggle("Keep \(host) Awake", isOn: Binding(get: { browser.keepsAwake(tab) },
+                                                      set: { browser.keepAwake($0, for: tab) }))
         }
         if tab.pin == nil {
             Button("Pin") { browser.pin(tab) }

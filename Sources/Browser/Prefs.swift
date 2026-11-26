@@ -48,6 +48,11 @@ final class Preferences: ObservableObject {
     @Published var bare: Bool {
         didSet { store.set(bare, forKey: "bare") }
     }
+    /// Sites kept awake by choice (Keep This Site Awake): their tabs never
+    /// sleep, even when memory runs low (from upstream Search, #627).
+    @Published var awakeSites: Set<String> {
+        didSet { store.set(Array(awakeSites).sorted(), forKey: "tabs.awakeSites") }
+    }
     /// How wide the column is. Pulled by its edge, and remembered — once
     /// the hand has rested a moment, not at every pixel it passes through
     /// (2 Oct 2026).
@@ -112,6 +117,11 @@ final class Preferences: ObservableObject {
     @Published var savesPasswords: Bool {
         didSet { store.set(savesPasswords, forKey: "passwords.save") }
     }
+    /// Touch ID, or the Mac's password, before a saved password goes into a
+    /// page (Vault.FillProof). On unless turned off.
+    @Published var asksBeforeFilling: Bool {
+        didSet { store.set(asksBeforeFilling, forKey: "passwords.fill.prove") }
+    }
     /// Put a kept name and password into a sign-in as soon as one appears.
     @Published var fillsPasswords: Bool {
         didSet { store.set(fillsPasswords, forKey: "passwords.fill") }
@@ -162,6 +172,7 @@ final class Preferences: ObservableObject {
         sidebar = store.object(forKey: "sidebar") as? Bool
             ?? (store.string(forKey: "manner") == "side")
         bare = store.bool(forKey: "bare")
+        awakeSites = Set(store.stringArray(forKey: "tabs.awakeSites") ?? [])
         let width = store.object(forKey: "sidebar.width") as? Double ?? Double(Metrics.side)
         sideWidth = min(Metrics.sideMax, max(Metrics.sideMin, CGFloat(width)))
         glyph = store.string(forKey: "glyph").flatMap(Glyph.init) ?? .letters
@@ -195,6 +206,7 @@ final class Preferences: ObservableObject {
                 ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
         asksWhereToSave = store.bool(forKey: "downloads.ask")
         savesPasswords = store.object(forKey: "passwords.save") as? Bool ?? true
+        asksBeforeFilling = store.object(forKey: "passwords.fill.prove") as? Bool ?? true
         fillsPasswords = store.object(forKey: "passwords.fill") as? Bool ?? true
         fillsForms = store.object(forKey: "forms.fill") as? Bool ?? true
         learnsForms = store.object(forKey: "forms.learn") as? Bool ?? true

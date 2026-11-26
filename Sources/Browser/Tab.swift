@@ -601,6 +601,10 @@ final class Tab: ObservableObject, Identifiable {
         controller.addUserScript(
             WKUserScript(source: MediaKeys.watch, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: MediaKeys.world)
         )
+        // Every frame: an embedded video takes its keys in its own document.
+        controller.addUserScript(
+            WKUserScript(source: VideoKeys.script, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: MediaKeys.world)
+        )
         controller.addUserScript(
             WKUserScript(source: StoreRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
         )
@@ -931,6 +935,8 @@ final class Tab: ObservableObject, Identifiable {
     /// How many are waiting, as the page's title says it: "(3) WhatsApp",
     /// Gmail's "Inbox (3) - …". Nil for none, "99+" past that.
     var unread: String? {
+        // Asleep, the last title it had may be long out of date.
+        guard !asleep else { return nil }
         func count(_ text: Substring) -> String? {
             let digits = text.filter { !",. \u{202F}".contains($0) }
             guard let n = Int(digits), n > 0 else { return nil }
@@ -1180,6 +1186,14 @@ final class Tab: ObservableObject, Identifiable {
             web.reload()
         }
     }
+    /// The site Keep This Site Awake speaks for: a web page's host.
+    var awakeHost: String? {
+        guard let address, ["http", "https"].contains(address.scheme?.lowercased() ?? "") else { return nil }
+        return address.host()?.lowercased()
+    }
+
+    func stopIfLoading() { if loading { stop() } }
+
     func stop() { invalidateNavigation(); built?.stopLoading() }
     /// Straight through, every time. A page that has to be fetched again is
     /// fetched again — nothing is kept behind to make that look otherwise.
@@ -1214,6 +1228,8 @@ final class Tab: ObservableObject, Identifiable {
         ears.stop()
         guard let web = built else { return }
         built = nil
+        // A process too busy to hear the view go would outlive it (Stuck).
+        Stuck.watch(web)
         let controller = web.configuration.userContentController
         controller.removeScriptMessageHandler(forName: ScrollRelay.name)
         controller.removeScriptMessageHandler(forName: VeilRelay.name)

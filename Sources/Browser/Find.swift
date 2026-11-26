@@ -89,13 +89,21 @@ struct FindBar: View {
         }
     }
 
+    /// The count walks open shadow trees too — the widgets modern pages are
+    /// built from, which WebKit's own find already looks through — and reads
+    /// past soft hyphens, which a page draws as nothing (from upstream
+    /// Search, #1476).
     private static let tally = """
     (function(q){var s=window.getSelection(),r=s&&s.rangeCount?s.getRangeAt(0):null;\
-    var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,{acceptNode:function(n){\
-    var p=n.parentNode&&n.parentNode.nodeName;\
-    return p=='SCRIPT'||p=='STYLE'||p=='NOSCRIPT'?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT;}});\
-    var lq=q.toLowerCase(),n=0,at=0,t;while((t=w.nextNode())){var v=t.nodeValue.toLowerCase(),i=-1;\
-    while((i=v.indexOf(lq,i+1))!==-1){n++;if(r&&r.startContainer===t&&r.startOffset===i)at=n;}}return [at,n];})
+    var lq=q.toLowerCase().replace(/\\u00AD/g,''),n=0,at=0,skip={SCRIPT:1,STYLE:1,NOSCRIPT:1,TEMPLATE:1};\
+    if(!lq)return [0,0];\
+    function text(t){var raw=t.nodeValue,map=null,c=raw;\
+    if(raw.indexOf('\\u00AD')>=0){map=[];c='';for(var k=0;k<raw.length;k++){if(raw[k]!=='\\u00AD'){map.push(k);c+=raw[k];}}}\
+    var v=c.toLowerCase(),i=-1;while((i=v.indexOf(lq,i+1))!==-1){n++;\
+    if(r&&r.startContainer===t&&r.startOffset===(map?map[i]:i))at=n;}}\
+    function walk(node){for(var ch=node.firstChild;ch;ch=ch.nextSibling){\
+    if(ch.nodeType===3)text(ch);else if(ch.nodeType===1&&!skip[ch.nodeName]){if(ch.shadowRoot)walk(ch.shadowRoot);walk(ch);}}}\
+    if(document.body)walk(document.body);return [at,n];})
     """
 
     private func step(_ icon: String, action: @escaping () -> Void) -> some View {

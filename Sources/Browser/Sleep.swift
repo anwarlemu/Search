@@ -108,6 +108,7 @@ extension Browser {
         guard let web = tab.built else { return "no page" }
         if tab.loading { return "still loading" }
         if tab.noisy { return "playing sound" }
+        if keepsAwake(tab) { return "kept awake for this site" }
         if tab.floating || floating == tab.id { return "its video is out" }
         if Browser.startsOver(tab.address) { return "an app that would start over" }
         if web.cameraCaptureState != .none || web.microphoneCaptureState != .none { return "on a call" }
@@ -115,6 +116,23 @@ extension Browser {
         // A sign-in window hands its answer back to the page that opened it.
         if active?.opener == tab.id { return "the page on screen came from it" }
         return nil
+    }
+
+    /// Chosen with Keep This Site Awake, in a private window for that
+    /// window alone: its choices are never written down.
+    func keepsAwake(_ tab: Tab) -> Bool {
+        guard let host = tab.awakeHost else { return false }
+        return (isPrivate ? privateAwake : prefs.awakeSites).contains(host)
+    }
+
+    func keepAwake(_ on: Bool, for tab: Tab) {
+        guard let host = tab.awakeHost else { return }
+        if isPrivate {
+            if on { privateAwake.insert(host) } else { privateAwake.remove(host) }
+        } else {
+            if on { prefs.awakeSites.insert(host) } else { prefs.awakeSites.remove(host) }
+        }
+        announce(on ? "\(host) stays awake" : "\(host) can sleep again")
     }
 
     /// Sites that are an app more than a page: put to sleep and rebuilt,

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Security
 import LocalAuthentication
@@ -222,13 +223,58 @@ enum Vault {
         let context = LAContext()
         var trouble: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &trouble) else {
-            // No way to ask at all — a Mac with no password set. Then there is
-            // nothing to prove.
-            done(true)
+            // No way to ask at all: a yes only for a Mac with no password
+            // set, where there is nothing to prove. Any other reason the Mac
+            // can't ask — Touch ID locked out, no screen to ask on — is a no
+            // (from upstream Search, idea 993).
+            done(trouble?.code == LAError.passcodeNotSet.rawValue)
             return
         }
         context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { ok, _ in
             DispatchQueue.main.async { done(ok) }
+        }
+    }
+
+    // MARK: - before a fill
+
+    /// A saved password goes into a page only once the Mac's owner has said
+    /// so — Touch ID, the watch, or the Mac's password — as Safari's "Use
+    /// Touch ID to AutoFill" asks. One yes holds for a minute, Chrome's
+    /// grace, so a sign-in that wants its password again a moment later
+    /// isn't asked twice; it ends early when the screens sleep or lock.
+    /// Nothing is ever filled on page load: every fill is a pick.
+    @MainActor enum FillProof {
+        static let grace: TimeInterval = 60
+        private static var provenAt: Date?
+        private static var asking = false
+        private static var watching = false
+
+        static func ask(_ host: String, _ done: @escaping (Bool) -> Void) {
+            if let provenAt, Date().timeIntervalSince(provenAt) < grace { done(true); return }
+            guard !asking else { done(false); return }
+            watch()
+            asking = true
+            Vault.prove("fill your password for \(host)") { ok in
+                asking = false
+                if ok { provenAt = Date() }
+                done(ok)
+            }
+        }
+
+        /// The yes is spent: the next fill asks again.
+        static func forget() { provenAt = nil }
+
+        private static func watch() {
+            guard !watching else { return }
+            watching = true
+            let spend: (Notification) -> Void = { _ in MainActor.assumeIsolated { forget() } }
+            let workspace = NSWorkspace.shared.notificationCenter
+            for name in [NSWorkspace.screensDidSleepNotification, NSWorkspace.willSleepNotification,
+                         NSWorkspace.sessionDidResignActiveNotification] {
+                workspace.addObserver(forName: name, object: nil, queue: .main, using: spend)
+            }
+            DistributedNotificationCenter.default().addObserver(
+                forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main, using: spend)
         }
     }
 

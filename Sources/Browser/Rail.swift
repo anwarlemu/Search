@@ -105,6 +105,8 @@ private struct RailSquare: View, Equatable {
                     .foregroundStyle((live ? Palette.ink : Palette.muted).opacity(tab.asleep ? 0.45 : 1))
             }
         }
+        .unreadBadge(pinned ? tab.unread : nil, icon: (size * 0.47).rounded(),
+                     ring: live ? Palette.wash : hovering ? Palette.hover : pinned ? Palette.wash.opacity(0.55) : Palette.ground)
         .frame(width: size, height: size)
         .background(
             RoundedRectangle(cornerRadius: radius, style: .continuous)

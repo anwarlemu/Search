@@ -374,6 +374,9 @@ struct ContentView: View {
     /// The press last handed to the page, to know it when WebKit sends it
     /// back unused.
     static var offered: NSEvent?
+    /// The Escape last handed to a page in full screen, to know it when
+    /// WebKit sends it back unused.
+    static var escaped: NSEvent?
     @ObservedObject var browser: Browser
     @Environment(\.openWindow) private var openWindow
 
@@ -451,6 +454,12 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.12), value: browser.active?.immersed)
     }
 
+    /// Where the page starts from the window's left, for the site card.
+    private var siteLead: CGFloat {
+        guard browser.prefs.sidebar, browser.active?.immersed != true else { return 0 }
+        return browser.prefs.bare ? Metrics.rail : browser.prefs.sideWidth
+    }
+
     /// Everything that rises from the bottom edge to say one thing.
     private var bars: some View {
         VStack(spacing: 8) {
@@ -512,6 +521,26 @@ struct ContentView: View {
         }
         if browser.frontPanel == .passwords {
             sheet { PasswordsPanel(browser: browser) } close: { browser.managing = false }
+        }
+        if browser.frontPanel == .site, let id = browser.inspecting,
+           let tab = browser.tabs.first(where: { $0.id == id }) {
+            // Beside the tabs, over the page, like the list of hidden things.
+            GeometryReader { geometry in
+                ZStack(alignment: .topLeading) {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { browser.inspecting = nil }
+                    SitePanel(browser: browser, tab: tab, prefs: browser.prefs)
+                        .environment(\.panelSize, CGSize(
+                            width: max(0, geometry.size.width - 28),
+                            height: max(0, geometry.size.height - Metrics.strip - 22)))
+                        .padding(.top, Metrics.strip + 8)
+                        .padding(.leading, siteLead + 14)
+                        .transition(.scale(scale: 0.97, anchor: .topLeading).combined(with: .opacity))
+                }
+            }
+            .ignoresSafeArea()
+            .transition(.opacity)
         }
         if browser.frontPanel == .hidden {
             // No dimming for this one: the whole point is to keep looking at
@@ -978,6 +1007,27 @@ struct ContentView: View {
             if browser.picked != nil {
                 browser.picked = nil
                 return true
+            }
+            // In the window's full screen, as in Safari: the press is the
+            // page's, to close its own pop-up, and the window stays in full
+            // screen even when the page has no use for it. WebKit hands a key
+            // it didn't use back through the app; that copy goes no further,
+            // where AppKit would have taken the window out of full screen on
+            // it (from upstream Search, idea 582).
+            if !browser.editing, let own = browser.window, event.window === own,
+               own.styleMask.contains(.fullScreen) {
+                if let handed = ContentView.escaped, PageView.same(handed, event) {
+                    ContentView.escaped = nil
+                    return true
+                }
+                var at = own.firstResponder as? NSView
+                while let here = at, !(here is PageView) { at = here.superview }
+                if let page = at as? PageView {
+                    browser.active?.stopIfLoading()
+                    ContentView.escaped = event
+                    page.keyDown(with: event)
+                    return true
+                }
             }
             // A page still on its way stops, as in Chrome — and the key goes
             // on to the page, which may want it as well.

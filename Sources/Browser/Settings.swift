@@ -362,6 +362,11 @@ struct SettingsPanel: View {
                     Switch(on: $prefs.fillsPasswords)
                 }
                 Rule()
+                Line("Ask for Touch ID before filling", "Or your Mac's password. Once you've said yes, not again for a minute, or until the Mac sleeps or locks") {
+                    Switch(on: Binding(get: { prefs.asksBeforeFilling },
+                                       set: { prefs.asksBeforeFilling = $0; Vault.FillProof.forget() }))
+                }
+                Rule()
                 Line(
                     "Offer passkeys",
                     prefs.passkeysPossible

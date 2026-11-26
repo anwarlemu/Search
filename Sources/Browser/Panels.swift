@@ -2,12 +2,13 @@ import SwiftUI
 
 extension Browser {
     enum Panel: Equatable {
-        case history, downloads, settings, bookmarks, welcome, passwords, hidden
+        case history, downloads, settings, bookmarks, welcome, passwords, hidden, site
     }
 
     /// The same order as the overlays are drawn. Escape dismisses the one
     /// a person can see before changing anything underneath it.
     var frontPanel: Panel? {
+        if inspecting != nil { return .site }
         if reviewing { return .hidden }
         if managing { return .passwords }
         if welcoming { return .welcome }
@@ -29,6 +30,7 @@ extension Browser {
         case .welcome: welcoming = false; prefs.welcomed = true
         case .passwords: managing = false
         case .hidden: reviewing = false; stopPeeking()
+        case .site: inspecting = nil
         }
         return true
     }
