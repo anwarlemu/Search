@@ -61,7 +61,7 @@ enum NowPlaying {
     }
 
     /// The card's height and the air above it, which the rows stop short of.
-    static let height: CGFloat = 58 + 8
+    static let height: CGFloat = 48 + 8
 }
 
 extension Browser {
@@ -80,21 +80,27 @@ struct NowPlayingCard: View {
 
     @State private var info = NowPlaying.Info()
     @State private var hovering = false
+    /// The card's own width: a narrow column gets a smaller picture and
+    /// tighter buttons, so the title still has room.
+    @State private var width: CGFloat = 200
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var narrow: Bool { width < 200 }
+    private var art: CGFloat { narrow ? 24 : 30 }
+
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: narrow ? 7 : 9) {
             artwork
-                .frame(width: 36, height: 36)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .frame(width: art, height: art)
+                .clipShape(RoundedRectangle(cornerRadius: art * 0.22, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(info.title.isEmpty ? tab.label : info.title)
-                    .font(.system(size: 13))
+                    .font(.system(size: narrow ? 12 : 12.5))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
                 Text(subtitle)
-                    .font(.system(size: 11.5))
+                    .font(.system(size: 11))
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)
             }
@@ -113,16 +119,21 @@ struct NowPlayingCard: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Palette.ink)
                     .symbolEffect(.variableColor.iterative, options: .repeating, isActive: !reduceMotion)
-                    .frame(width: 20)
+                    .frame(width: 18)
             } else {
                 Image(systemName: "pause.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(Palette.muted)
-                    .frame(width: 20)
+                    .frame(width: 18)
             }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 58)
+        .padding(.horizontal, narrow ? 6 : 8)
+        .frame(height: 48)
+        .background(GeometryReader { geo in
+            Color.clear
+                .onAppear { width = geo.size.width }
+                .onChange(of: geo.size.width) { _, now in width = now }
+        })
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(hovering ? Palette.hover : Palette.wash.opacity(0.7))
@@ -162,7 +173,7 @@ struct NowPlayingCard: View {
     private var mark: some View {
         ZStack {
             Palette.wash
-            Mark(icon: tab.icon, letter: tab.monogram, size: 18)
+            Mark(icon: tab.icon, letter: tab.monogram, size: (art * 0.55).rounded())
         }
     }
 
@@ -171,7 +182,7 @@ struct NowPlayingCard: View {
             Image(systemName: symbol)
                 .font(.system(size: 11))
                 .foregroundStyle(Palette.ink)
-                .frame(width: 24, height: 28)
+                .frame(width: narrow ? 19 : 22, height: 28)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
