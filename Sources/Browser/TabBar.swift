@@ -784,7 +784,11 @@ struct TabAddressField: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(browser: browser) }
 
     func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
+        let field = PasteGoField()
+        field.pasteAndGo = { [weak browser] text in
+            browser?.tabDraft = text
+            browser?.commitTabEdit()
+        }
         field.delegate = context.coordinator
         field.isBordered = false
         field.drawsBackground = false

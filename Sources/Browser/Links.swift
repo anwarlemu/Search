@@ -63,6 +63,7 @@ final class Links: NSObject, NSApplicationDelegate {
     /// five of them meant five rebuilds of the content before the window
     /// had shown once.
     func applicationWillFinishLaunching(_ notification: Notification) {
+        Scrollbars.fade()
         Links.watchForTrouble()
         NSAppleEventManager.shared().setEventHandler(
             self, andSelector: #selector(handle(getURL:reply:)),

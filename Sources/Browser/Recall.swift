@@ -290,9 +290,34 @@ struct DownloadsPanel: View {
             .padding(.vertical, 9)
             .background(hovering ? Palette.hover : .clear)
             .contentShape(Rectangle())
+            .modifier(DragOut(keep: keep))
             .onTapGesture { if keep.stillThere { open() } }
             .onHover { hovering = $0 }
             .animation(Motion.quick, value: hovering)
+        }
+    }
+
+    /// A finished download dragged out of the list as its file — onto a page
+    /// as an upload, into another app as the file — with the file's icon
+    /// under the pointer. The drag starts only once the pointer moves, so a
+    /// click still opens it (from upstream Search, idea 566).
+    private struct DragOut: ViewModifier {
+        let keep: Keep
+
+        func body(content: Content) -> some View {
+            if keep.stillThere {
+                content.onDrag {
+                    let provider = NSItemProvider(object: keep.url as NSURL)
+                    provider.suggestedName = keep.name
+                    return provider
+                } preview: {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: keep.path))
+                        .resizable()
+                        .frame(width: 32, height: 32)
+                }
+            } else {
+                content
+            }
         }
     }
 }

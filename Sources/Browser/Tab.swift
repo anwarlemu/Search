@@ -816,7 +816,13 @@ final class Tab: ObservableObject, Identifiable {
         picture = nil
         cover = nil
         adoptIcon()
-        web.visit(url)
+        // Out of sight, in its turn (LoadTurns).
+        let view = web
+        LoadTurns.shared.start(view) { [weak self, weak view] in
+            guard let self, let view, self.built === view, self.address == url else { return false }
+            view.visit(url)
+            return true
+        }
     }
 
     /// Brought back from the last session: everything the row needs to draw it,
@@ -905,6 +911,41 @@ final class Tab: ObservableObject, Identifiable {
                 DispatchQueue.main.async { done(data) }
             }
         }
+    }
+
+    /// A picture of the page for a glance at it (a pin's hover card): the
+    /// page as it is when it is awake, the picture kept for its waking when
+    /// it sleeps, nothing when it never opened. Nothing is loaded or woken.
+    func glance(width: CGFloat, _ done: @escaping (NSImage?) -> Void) {
+        if let built, !asleep, built.bounds.width > 0 {
+            let shape = WKSnapshotConfiguration()
+            shape.snapshotWidth = NSNumber(value: Double(width))
+            built.takeSnapshot(with: shape) { image, _ in done(image) }
+        } else if let picture {
+            done(NSImage(data: picture))
+        } else {
+            done(nil)
+        }
+    }
+
+    /// How many are waiting, as the page's title says it: "(3) WhatsApp",
+    /// Gmail's "Inbox (3) - …". Nil for none, "99+" past that.
+    var unread: String? {
+        func count(_ text: Substring) -> String? {
+            let digits = text.filter { !",. \u{202F}".contains($0) }
+            guard let n = Int(digits), n > 0 else { return nil }
+            return n > 99 ? "99+" : String(n)
+        }
+        let title = self.title.trimmingCharacters(in: .whitespaces)
+        if title.hasPrefix("("), let close = title.firstIndex(of: ")") {
+            return count(title[title.index(after: title.startIndex)..<close])
+        }
+        // A mailbox: the count in its own part, before the account.
+        let mail = ["mail.google.com", "outlook.live.com", "outlook.office.com", "mail.proton.me", "app.fastmail.com"]
+        guard let host = address?.host()?.lowercased(), mail.contains(host) else { return nil }
+        let part = title.components(separatedBy: " - ").first ?? title
+        guard let open = part.firstIndex(of: "("), let close = part[open...].firstIndex(of: ")") else { return nil }
+        return count(part[part.index(after: open)..<close])
     }
 
     nonisolated private static func jpeg(_ image: CGImage) -> Data? {
@@ -1351,6 +1392,8 @@ final class PageView: WKWebView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        // In sight now: a load waiting its turn starts (LoadTurns).
+        if window != nil { LoadTurns.shared.shown(self) }
         if window != nil { onWindow?() }
     }
 

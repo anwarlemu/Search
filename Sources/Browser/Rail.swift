@@ -120,9 +120,10 @@ private struct RailSquare: View, Equatable {
         }
         .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .onTapGesture { if !browser.choose(tab) { browser.select(tab) } }
-        .onHover { hovering = $0 }
+        // The tab's card beside the rail says its name, and for a pin shows
+        // its page (Hover.swift).
+        .onHover { hovering = $0; browser.point(at: tab, $0) }
         .contextMenu { TabMenu(browser: browser, tab: tab, close: { browser.close(tab) }) }
-        .help(tab.label)
         .animation(Motion.quick, value: hovering)
     }
 }

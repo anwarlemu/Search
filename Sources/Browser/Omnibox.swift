@@ -271,7 +271,10 @@ struct AddressField: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(browser: browser) }
 
     func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
+        let field = PasteGoField()
+        field.pasteAndGo = { [weak coordinator = context.coordinator] text in
+            coordinator?.browser.pasteAndGo(text)
+        }
         field.delegate = context.coordinator
         field.isBordered = false
         field.drawsBackground = false
@@ -399,5 +402,36 @@ struct AddressField: NSViewRepresentable {
                 return false
             }
         }
+    }
+}
+
+/// An address field with Paste and Go in its right-click menu, under Paste:
+/// what is on the clipboard put in the field and gone to at once — Paste and
+/// Search when it is words rather than an address (from upstream Search,
+/// #1615). Offered only for one line of text.
+final class PasteGoField: NSTextField {
+    var pasteAndGo: ((String) -> Void)?
+    private var pending = ""
+
+    @objc func textView(_ textView: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
+        guard pasteAndGo != nil,
+              let raw = NSPasteboard.general.string(forType: .string),
+              case let text = raw.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty, text.rangeOfCharacter(from: .newlines) == nil
+        else { return menu }
+        pending = text
+        let title = Address.url(from: text) != nil ? "Paste and Go" : "Paste and Search"
+        let item = NSMenuItem(title: title, action: #selector(goPasted(_:)), keyEquivalent: "")
+        item.target = self
+        if let paste = menu.items.firstIndex(where: { $0.action == #selector(NSText.paste(_:)) }) {
+            menu.insertItem(item, at: paste + 1)
+        } else {
+            menu.insertItem(item, at: 0)
+        }
+        return menu
+    }
+
+    @objc private func goPasted(_ sender: NSMenuItem) {
+        pasteAndGo?(pending)
     }
 }

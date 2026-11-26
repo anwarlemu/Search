@@ -26,14 +26,14 @@ final class HoverCard {
         guard NSEvent.pressedMouseButtons == 0, browser.editingTab != tab.id, let window = browser.window else { return }
         let warm = panel?.isVisible == true || Date().timeIntervalSince(gone) < 0.4
         if warm {
-            show(tab, in: browser, window: window, fade: false)
+            present(tab, in: browser, window: window, fade: false)
             return
         }
         let work = DispatchWorkItem { [weak self, weak tab, weak browser] in
             guard let self, let tab, let browser, let window = browser.window,
                   NSEvent.pressedMouseButtons == 0
             else { return }
-            show(tab, in: browser, window: window, fade: true)
+            present(tab, in: browser, window: window, fade: true)
         }
         waiting = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
@@ -51,6 +51,7 @@ final class HoverCard {
 
     func hide() {
         waiting?.cancel()
+        asked = nil
         guard let panel, panel.isVisible else { return }
         panel.parent?.removeChildWindow(panel)
         panel.orderOut(nil)
@@ -58,14 +59,41 @@ final class HoverCard {
         gone = Date()
     }
 
-    private func show(_ tab: Tab, in browser: Browser, window: NSWindow, fade: Bool) {
+    /// A pin you aren't on gets a picture of its page on its card, and what
+    /// is waiting in it, as upstream Search's pin previews (idea 1205): a
+    /// glance at Gmail or Calendar without going there. The picture first,
+    /// so the card comes in at its size. A private tab's page is never
+    /// pictured outside it.
+    private func present(_ tab: Tab, in browser: Browser, window: NSWindow, fade: Bool) {
+        guard tab.pin != nil, tab.id != browser.activeID, !tab.shy else {
+            show(tab, in: browser, window: window, fade: fade, picture: nil)
+            return
+        }
+        asked = tab.id
+        tab.glance(width: HoverCard.pictured) { [weak self, weak tab, weak browser, weak window] image in
+            MainActor.assumeIsolated {
+                guard let self, let tab, let browser, let window, self.asked == tab.id,
+                      browser.pointed == tab.id else { return }
+                self.show(tab, in: browser, window: window, fade: fade, picture: image)
+            }
+        }
+    }
+    /// The pin a picture is on its way for.
+    private var asked: Tab.ID?
+    /// A pictured card's width.
+    static let pictured: CGFloat = 260
+
+    private func show(_ tab: Tab, in browser: Browser, window: NSWindow, fade: Bool, picture: NSImage?) {
         let panel = self.panel ?? make()
         self.panel = panel
         showing = tab
         let title = tab.title.isEmpty ? tab.label : tab.title
         let site = tab.address.map(Address.pretty) ?? ""
         let state = tab.muted ? "Muted" : tab.noisy ? "Playing sound" : tab.asleep ? "Asleep — opens when picked" : nil
-        let face = Face(title: title, site: site, state: state, width: HoverCard.width(title: title, site: site, state: state))
+        let unread = tab.pin != nil ? tab.unread : nil
+        let face = Face(title: title, site: site, state: unread.map { "\($0) unread" } ?? state,
+                        width: picture == nil ? HoverCard.width(title: title, site: site, state: state) : HoverCard.pictured,
+                        picture: picture)
         host?.rootView = face
         let size = host?.fittingSize ?? NSSize(width: 260, height: 54)
 
@@ -74,7 +102,7 @@ final class HoverCard {
         let frame = window.frame
         var origin: NSPoint
         if browser.prefs.sidebar {
-            origin = NSPoint(x: frame.minX + browser.prefs.sideWidth + 8, y: at.y - size.height / 2)
+            origin = NSPoint(x: frame.minX + (browser.prefs.bare ? Metrics.rail : browser.prefs.sideWidth) + 8, y: at.y - size.height / 2)
         } else {
             origin = NSPoint(x: at.x - 24, y: frame.maxY - Metrics.strip - 6 - size.height)
         }
@@ -121,7 +149,7 @@ final class HoverCard {
         panel.ignoresMouseEvents = true
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = true
-        let host = NSHostingView(rootView: Face(title: "", site: "", state: nil, width: 120))
+        let host = NSHostingView(rootView: Face(title: "", site: "", state: nil, width: 120, picture: nil))
         panel.contentView = host
         self.host = host
         return panel
@@ -132,8 +160,26 @@ final class HoverCard {
         let site: String
         let state: String?
         let width: CGFloat
+        let picture: NSImage?
 
         var body: some View {
+            VStack(alignment: .leading, spacing: 0) {
+                if let picture {
+                    Image(nsImage: picture)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: width, height: (width * 0.62).rounded(), alignment: .top)
+                        .clipped()
+                }
+                words
+            }
+            .frame(width: width, alignment: .leading)
+            // The live tab's own grey and corner — no border, no shadow.
+            .background(Palette.wash)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+
+        private var words: some View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.system(size: 12.5, weight: .medium))
@@ -156,8 +202,6 @@ final class HoverCard {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .frame(width: width, alignment: .leading)
-            // The live tab's own grey and corner — no border, no shadow.
-            .background(Palette.wash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
     }
 }

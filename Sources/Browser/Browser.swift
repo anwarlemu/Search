@@ -2625,6 +2625,16 @@ final class Browser: NSObject, ObservableObject {
         typed = ""
     }
 
+    /// Paste and Go from the address field's right-click menu: straight
+    /// there, nothing finished from history in between.
+    func pasteAndGo(_ text: String) {
+        guard let url = Google.destination(for: text) else { return }
+        summoning = false
+        go(to: url)
+        editing = false
+        typed = ""
+    }
+
     // MARK: - the page
 
     func zoom(by factor: CGFloat) { active?.magnify(by: factor) }
